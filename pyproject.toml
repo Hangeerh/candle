@@ -1,0 +1,29 @@
+[project]
+name = "candle"
+version = "0.1.0"
+description = "Utilities for PyTorch"
+readme = "README.md"
+licence = {text = "MIT"}
+authors = [
+  {name = "Hangeer", email = "hangeerh@sina.com"}
+]
+requires-python = ">=3.14"
+dependencies = [
+    "numpy>=2.5.1",
+    "torch>=2.13.0",
+]
+keywords = ["utility", "pytorch"]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.0",
+    "pytest>=9.1.1",
+    "ruff>=0.15.21",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["/candle"]
