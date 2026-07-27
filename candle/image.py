@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 __all__ = ["ImageCollection"]
 
@@ -26,25 +27,32 @@ class ImageCollection:
             if file.is_file():
                 self.add(file)
 
+    def batch_rename(self, scheme: Literal["numbered"] = "numbered"):
+        if scheme == "numbered":
+            digits = len(str(abs(len(self.images))))
+            for index, img in enumerate(self.images):
+                img.new_name = f"{index:0{digits}d}"
+
     def save(self, dir: str | Path):
         ndir = _norm_path(dir)
         ndir.mkdir(parents=True, exist_ok=True)
 
         for img in self.images:
-            src = img.dir / img.file
+            src = img.dir / (img.name + img.extens)
             if img.new_name is None:
-                dst = ndir / img.file
+                dst = ndir / (img.name + img.extens)
             else:
-                dst = ndir / img.new_name
+                dst = ndir / (img.new_name + img.extens)
             src.copy(dst, preserve_metadata=True)
 
 
 class Image:
     def __init__(self, image: Path):
         path = _norm_path(image)
-        self.file = path.name
-        self.dir = path.parent
-        self.new_name = None
+        self.name: str = path.stem
+        self.extens: str = path.suffix
+        self.dir: Path = path.parent
+        self.new_name: str | None = None
 
 
 def _norm_path(path: str | Path):

@@ -3,16 +3,25 @@ name = "candle"
 version = "0.0.1"
 description = "Utilities for PyTorch"
 readme = "README.md"
-licence = {text = "MIT"}
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
 authors = [
   {name = "Hangeer", email = "hangeerh@sina.com"}
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "numpy>=2.5.1",
     "torch>=2.13.0",
 ]
 keywords = ["utility", "pytorch"]
+
+[project.urls]
+Homepage = "https://github.com/Hangeerh/candle"
+Issues = "https://github.com/Hangeerh/candle/issues"
 
 [dependency-groups]
 dev = [
