@@ -85,10 +85,10 @@ class ImageCollection:
         for img in self.images:
             src = img.dir / (img.name + img.extens)
 
-            if img.new_name is None:
-                dst = ndir / (img.name + img.extens)
-            else:
-                dst = ndir / (img.new_name + img.extens)
+            name = img.name
+            if img.new_name is not None:
+                name = img.new_name
+            dst = ndir / (name + img.extens)
 
             if not img.attribute is None:
                 image_attribute_json.append({img.name: img.attribute})
