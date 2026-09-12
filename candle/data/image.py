@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Literal
+import json
 
 __all__ = ["ImageCollection", "Image"]
 
@@ -79,13 +80,24 @@ class ImageCollection:
         ndir = _norm_path(dir)
         ndir.mkdir(parents=True, exist_ok=True)
 
+        image_attribute_json: list[dict[str, dict]] = []
+
         for img in self.images:
             src = img.dir / (img.name + img.extens)
+
             if img.new_name is None:
                 dst = ndir / (img.name + img.extens)
             else:
                 dst = ndir / (img.new_name + img.extens)
+
+            if not img.attribute is None:
+                image_attribute_json.append({img.name: img.attribute})
+
             src.copy(dst, preserve_metadata=True)
+
+        if image_attribute_json:
+            with open(ndir / "meta.json", "w") as f:
+                json.dump(image_attribute_json, f, indent=2)
 
 
 class Image:
