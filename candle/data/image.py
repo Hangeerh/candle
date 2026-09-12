@@ -91,7 +91,7 @@ class ImageCollection:
             dst = ndir / (name + img.extens)
 
             if not img.attribute is None:
-                image_attribute_json.append({img.name: img.attribute})
+                image_attribute_json.append({name + img.extens: img.attribute})
 
             src.copy(dst, preserve_metadata=True)
 
