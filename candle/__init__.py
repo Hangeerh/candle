@@ -1,3 +1,3 @@
-from candle.image import ImageCollection, Image
+from candle import data
 
-__all__ = ["ImageCollection", "Image"]
+__all__ = ["data"]
