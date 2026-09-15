@@ -1,4 +1,5 @@
 from pathlib import Path
+from collections.abc import Callable
 import PIL.Image
 import PIL.ImageFile
 import torch
@@ -12,6 +13,7 @@ __all__ = ["ImageCollection", "Image"]
 class ImageCollection:
     def __init__(self):
         self.images: list[Image] = []
+        self.keep_mask: list[bool] = []
 
     def add(self, image: str | Path, attribute: dict | None = None):
         """Add one image to the ImageCollection
@@ -26,6 +28,7 @@ class ImageCollection:
             return
 
         self.images.append(Image(path, attribute))
+        self.keep_mask.append(True)
 
     def add_dir(
         self,
@@ -68,6 +71,17 @@ class ImageCollection:
                         image.attribute = attribute
                     break
 
+    def filter(self, filter_func: Callable[[Image], bool]):
+        """Filter images with the given function.
+
+        Args:
+            filter_func: A function f(Image) -> bool that determines which images to
+                keep. Should return True to keep image, and False to discard image.
+        """
+
+        for i, img in enumerate(self.images):
+            self.keep_mask[i] = filter_func(img)
+
     def batch_rename(self, scheme: Literal["numbered"] = "numbered"):
         """Rename all Images according to the specified scheme.
 
@@ -91,18 +105,19 @@ class ImageCollection:
 
         image_attribute_json: list[dict[str, dict]] = []
 
-        for img in self.images:
-            src = img.file_dir / (img.file_name + img.file_extens)
+        for i, img in enumerate(self.images):
+            if self.keep_mask[i]:
+                src = img.file_dir / (img.file_name + img.file_extens)
 
-            name = img.file_name
-            if img.new_name is not None:
-                name = img.new_name
-            dst = ndir / (name + img.file_extens)
+                name = img.file_name
+                if img.new_name is not None:
+                    name = img.new_name
+                dst = ndir / (name + img.file_extens)
 
-            if not img.attribute is None:
-                image_attribute_json.append({name + img.file_extens: img.attribute})
+                if not img.attribute is None:
+                    image_attribute_json.append({name + img.file_extens: img.attribute})
 
-            src.copy(dst, preserve_metadata=True)
+                src.copy(dst, preserve_metadata=True)
 
         if image_attribute_json:
             with open(ndir / "meta.json", "w") as f:
