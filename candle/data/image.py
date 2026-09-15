@@ -81,6 +81,11 @@ class ImageCollection:
                 img.new_name = f"{index:0{digits}d}"
 
     def save(self, dir: str | Path):
+        """Save the contents of the ImageCollection to a directory.
+
+        Args:
+            dir: The directory to save images.
+        """
         ndir = _norm_path(dir)
         ndir.mkdir(parents=True, exist_ok=True)
 
