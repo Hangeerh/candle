@@ -1,5 +1,9 @@
 from pathlib import Path
+import PIL.Image
+import PIL.ImageFile
+import torch
 from typing import Literal
+from torchvision.io import read_image
 import json
 
 __all__ = ["ImageCollection", "Image"]
@@ -101,13 +105,21 @@ class ImageCollection:
 
 
 class Image:
-    def __init__(self, image: Path, attribute: dict | None = None):
+    def __init__(self, image: str | Path, attribute: dict | None = None):
         path = _norm_path(image)
         self.file_name: str = path.stem
         self.file_extens: str = path.suffix
         self.file_dir: Path = path.parent
         self.new_name: str | None = None
         self.attribute: dict | None = attribute
+
+    def to_tensor(self) -> torch.Tensor:
+        return read_image(str(self.file_dir) + "/" + self.file_name + self.file_extens)
+
+    def to_pil(self) -> PIL.ImageFile.ImageFile:
+        return PIL.Image.open(
+            str(self.file_dir) + "/" + self.file_name + self.file_extens
+        )
 
 
 def _norm_path(path: str | Path):
