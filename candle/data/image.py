@@ -59,7 +59,7 @@ class ImageCollection:
         """
         for image_name, attribute in attribute_list:
             for image in self.images:
-                if image.name == image_name:
+                if image.file_name == image_name:
                     if image.attribute is None or override_existing_attributes:
                         image.attribute = attribute
                     break
@@ -83,15 +83,15 @@ class ImageCollection:
         image_attribute_json: list[dict[str, dict]] = []
 
         for img in self.images:
-            src = img.dir / (img.name + img.extens)
+            src = img.file_dir / (img.file_name + img.file_extens)
 
-            name = img.name
+            name = img.file_name
             if img.new_name is not None:
                 name = img.new_name
-            dst = ndir / (name + img.extens)
+            dst = ndir / (name + img.file_extens)
 
             if not img.attribute is None:
-                image_attribute_json.append({name + img.extens: img.attribute})
+                image_attribute_json.append({name + img.file_extens: img.attribute})
 
             src.copy(dst, preserve_metadata=True)
 
@@ -103,9 +103,9 @@ class ImageCollection:
 class Image:
     def __init__(self, image: Path, attribute: dict | None = None):
         path = _norm_path(image)
-        self.name: str = path.stem
-        self.extens: str = path.suffix
-        self.dir: Path = path.parent
+        self.file_name: str = path.stem
+        self.file_extens: str = path.suffix
+        self.file_dir: Path = path.parent
         self.new_name: str | None = None
         self.attribute: dict | None = attribute
 
