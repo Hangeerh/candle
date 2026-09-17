@@ -13,7 +13,6 @@ __all__ = ["ImageCollection", "Image"]
 class ImageCollection:
     def __init__(self):
         self.images: list[Image] = []
-        self.keep_mask: list[bool] = []
 
     def add(self, image: str | Path, attribute: dict | None = None):
         """Add one image to the ImageCollection
@@ -28,7 +27,6 @@ class ImageCollection:
             return
 
         self.images.append(Image(path, attribute))
-        self.keep_mask.append(True)
 
     def add_dir(
         self,
@@ -79,8 +77,8 @@ class ImageCollection:
                 keep. Should return True to keep image, and False to discard image.
         """
 
-        for i, img in enumerate(self.images):
-            self.keep_mask[i] = filter_func(img)
+        for img in self.images:
+            img.keep = filter_func(img)
 
     def batch_rename(self, scheme: Literal["numbered"] = "numbered"):
         """Rename all Images according to the specified scheme.
@@ -105,8 +103,8 @@ class ImageCollection:
 
         image_attribute_json: list[dict[str, dict]] = []
 
-        for i, img in enumerate(self.images):
-            if self.keep_mask[i]:
+        for img in self.images:
+            if img.keep:
                 src = img.file_dir / (img.file_name + img.file_extens)
 
                 name = img.file_name
@@ -132,6 +130,7 @@ class Image:
         self.file_dir: Path = path.parent
         self.new_name: str | None = None
         self.attribute: dict | None = attribute
+        self.keep = True
 
     def to_tensor(self) -> torch.Tensor:
         return read_image(str(self.file_dir) + "/" + self.file_name + self.file_extens)
