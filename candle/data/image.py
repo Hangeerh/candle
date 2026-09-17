@@ -80,6 +80,20 @@ class ImageCollection:
         for img in self.images:
             img.keep = filter_func(img)
 
+    def merge(self, collections: list[ImageCollection] | ImageCollection):
+        """Merge multiple collections into the current ImageCollection.
+
+        Args:
+            collections: List of ImageCollections to merge.
+        """
+
+        if isinstance(collections, ImageCollection):
+            self.images.extend(collections.images)
+            return
+
+        for col in collections:
+            self.images.extend(col.images)
+
     def batch_rename(self, scheme: Literal["numbered"] = "numbered"):
         """Rename all Images according to the specified scheme.
 
