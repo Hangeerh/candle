@@ -32,22 +32,39 @@ class ImageCollection:
         self,
         dir: str | Path,
         recursive: bool = False,
+        attributes_file: None | str | Path = None,
     ):
         """Add all images in a directory.
 
         Args:
             dir: The directory to add.
-            recursive: Recurese subdirectories if True, don't if False.
+            recursive: Recurses subdirectories if True, don't if False.
+            attributes_file: Optional json file containing the attributes/labels
+                of each image. If provided, the attribute file must be a json list
+                like [
+                        {"filename": "001.jpg", "attributes": "labels"},
+                        {"filename": "002.png", "attributes": "more labels"}
+                     ].
         """
         path = _norm_path(dir)
 
         if not path.is_dir():
             raise RuntimeError("Provided path is not a directory")
 
+        has_attribs = attributes_file is not None
+        if has_attribs:
+            with open(_norm_path(attributes_file), "r") as f:
+                attributes: dict = json.load(f)
+
         pattern = "**/*" if recursive else "*"
         for file in path.glob(pattern):
             if file.is_file():
-                self.add(file)
+                attribs = None
+                if has_attribs:
+                    for atr in attributes:
+                        if atr["filename"] == file.name:
+                            attribs = atr["attributes"]
+                self.add(file, attribute=attribs)
 
     def add_attributes(
         self,
@@ -62,9 +79,9 @@ class ImageCollection:
             override_existing_attributes: If True, the newly specified attribute
                 will override existing attributes.
         """
-        for image_name, attribute in attribute_list:
+        for image_file, attribute in attribute_list:
             for image in self.images:
-                if image.file_name == image_name:
+                if image.file_name + image.file_extens == image_file:
                     if image.attribute is None or override_existing_attributes:
                         image.attribute = attribute
                     break
@@ -115,7 +132,7 @@ class ImageCollection:
         ndir = _norm_path(dir)
         ndir.mkdir(parents=True, exist_ok=True)
 
-        image_attribute_json: list[dict[str, dict]] = []
+        image_attribute_json: list[dict] = []
 
         for img in self.images:
             if img.keep:
@@ -127,7 +144,12 @@ class ImageCollection:
                 dst = ndir / (name + img.file_extens)
 
                 if not img.attribute is None:
-                    image_attribute_json.append({name + img.file_extens: img.attribute})
+                    image_attribute_json.append(
+                        {
+                            "filename": name + img.file_extens,
+                            "attributes": img.attribute,
+                        }
+                    )
 
                 src.copy(dst, preserve_metadata=True)
 
