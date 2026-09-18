@@ -123,39 +123,59 @@ class ImageCollection:
             for index, img in enumerate(self.images):
                 img.new_name = f"{index:0{digits}d}"
 
-    def save(self, dir: str | Path):
+    def save(self, dir: str | Path, images_per_dir: None | int):
         """Save the contents of the ImageCollection to a directory.
 
         Args:
             dir: The directory to save images.
+            images_per_dir: If set to an int, shard the collection into multiple subdirs
+                in the given directory. Each subdir contains number of images specified
+                by images_per_dir. When set to None, everything will be put into one dir.
         """
         ndir = _norm_path(dir)
         ndir.mkdir(parents=True, exist_ok=True)
 
-        image_attribute_json: list[dict] = []
+        def copy_images_to_dir(chunk: list[Image], dir: Path):
+            image_attribute_json: list[dict] = []
 
-        for img in self.images:
-            if img.keep:
-                src = img.file_dir / (img.file_name + img.file_extens)
+            for img in chunk:
+                if img.keep:
+                    src = img.file_dir / (img.file_name + img.file_extens)
 
-                name = img.file_name
-                if img.new_name is not None:
-                    name = img.new_name
-                dst = ndir / (name + img.file_extens)
+                    name = img.file_name
+                    if img.new_name is not None:
+                        name = img.new_name
+                    dst = dir / (name + img.file_extens)
 
-                if not img.attribute is None:
-                    image_attribute_json.append(
-                        {
-                            "filename": name + img.file_extens,
-                            "attributes": img.attribute,
-                        }
-                    )
+                    if not img.attribute is None:
+                        image_attribute_json.append(
+                            {
+                                "filename": name + img.file_extens,
+                                "attributes": img.attribute,
+                            }
+                        )
 
-                src.copy(dst, preserve_metadata=True)
+                    src.copy(dst, preserve_metadata=True)
 
-        if image_attribute_json:
-            with open(ndir / "meta.json", "w") as f:
-                json.dump(image_attribute_json, f, indent=2)
+            if image_attribute_json:
+                with open(dir / "meta.json", "w") as f:
+                    json.dump(image_attribute_json, f, indent=2)
+
+        if images_per_dir is not None:
+            assert images_per_dir > 0, "images_per_dir must be greater than 0"
+
+            # This does ceiling division to include the remainder in the chunks.
+            for i in range(-(-len(self.images) // images_per_dir)):
+                dst_dir = ndir / f"{i:05d}"
+                dst_dir.mkdir()
+
+                copy_images_to_dir(
+                    self.images[images_per_dir * i : (i + 1) * images_per_dir], dst_dir
+                )
+
+            return
+
+        copy_images_to_dir(self.images, ndir)
 
 
 class Image:
