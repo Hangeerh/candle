@@ -1,5 +1,6 @@
 from pathlib import Path
 from collections.abc import Callable
+from collections import defaultdict
 import PIL.Image
 import PIL.ImageFile
 import torch
@@ -23,7 +24,7 @@ class ImageCollection:
         """
         path = _norm_path(image)
 
-        if not _is_valid_extension(path):
+        if not _is_valid_img_extension(path):
             return
 
         self.images.append(Image(path, attribute))
@@ -32,39 +33,40 @@ class ImageCollection:
         self,
         dir: str | Path,
         recursive: bool = False,
-        attributes_file: None | str | Path = None,
     ):
-        """Add all images in a directory.
+        """Add all images in a directory. Supports WebDataset format.
 
         Args:
             dir: The directory to add.
             recursive: Recurses subdirectories if True, don't if False.
-            attributes_file: Optional json file containing the attributes/labels
-                of each image. If provided, the attribute file must be a json list
-                like [
-                        {"filename": "001.jpg", "attributes": "labels"},
-                        {"filename": "002.png", "attributes": "more labels"}
-                     ].
         """
         path = _norm_path(dir)
 
         if not path.is_dir():
             raise RuntimeError("Provided path is not a directory")
 
-        has_attribs = attributes_file is not None
-        if has_attribs:
-            with open(_norm_path(attributes_file), "r") as f:
-                attributes: dict = json.load(f)
-
+        grouped_samples = defaultdict(dict)
         pattern = "**/*" if recursive else "*"
         for file in path.glob(pattern):
             if file.is_file():
-                attribs = None
-                if has_attribs:
-                    for atr in attributes:
-                        if atr["filename"] == file.name:
-                            attribs = atr["attributes"]
-                self.add(file, attribute=attribs)
+                prefix = file.stem
+                ext = file.suffix.lower()
+                grouped_samples[prefix][ext] = file
+
+        valid_extens = [".jpg", ".jpeg", ".png"]
+
+        for prefix, extens in grouped_samples.items():
+            img_ext = next((ext for ext in extens if ext in valid_extens), None)
+
+            if img_ext:
+                img_file = extens[img_ext]
+
+                attributes = None
+                if ".json" in extens:
+                    with open(extens[".json"], "r") as f:
+                        attributes = json.load(f)
+
+                self.add(img_file, attributes)
 
     def add_attributes(
         self,
@@ -124,7 +126,8 @@ class ImageCollection:
                 img.new_name = f"{index:0{digits}d}"
 
     def save(self, dir: str | Path, images_per_dir: None | int):
-        """Save the contents of the ImageCollection to a directory.
+        """Save the contents of the ImageCollection to a directory. The saved data will be
+        in WebDataset format.
 
         Args:
             dir: The directory to save images.
@@ -136,8 +139,6 @@ class ImageCollection:
         ndir.mkdir(parents=True, exist_ok=True)
 
         def copy_images_to_dir(chunk: list[Image], dir: Path):
-            image_attribute_json: list[dict] = []
-
             for img in chunk:
                 if img.keep:
                     src = img.file_dir / (img.file_name + img.file_extens)
@@ -145,21 +146,14 @@ class ImageCollection:
                     name = img.file_name
                     if img.new_name is not None:
                         name = img.new_name
-                    dst = dir / (name + img.file_extens)
+                    dst_image = dir / (name + img.file_extens)
 
                     if not img.attribute is None:
-                        image_attribute_json.append(
-                            {
-                                "filename": name + img.file_extens,
-                                "attributes": img.attribute,
-                            }
-                        )
+                        dst_meta = dir / (name + ".json")
+                        with open(dst_meta, "w") as f:
+                            json.dump(img.attribute, f)
 
-                    src.copy(dst, preserve_metadata=True)
-
-            if image_attribute_json:
-                with open(dir / "meta.json", "w") as f:
-                    json.dump(image_attribute_json, f, indent=2)
+                    src.copy(dst_image, preserve_metadata=True)
 
         if images_per_dir is not None:
             assert images_per_dir > 0, "images_per_dir must be greater than 0"
@@ -182,7 +176,7 @@ class Image:
     def __init__(self, image: str | Path, attribute: dict | None = None):
         path = _norm_path(image)
         self.file_name: str = path.stem
-        self.file_extens: str = path.suffix
+        self.file_extens: str = path.suffix.lower()
         self.file_dir: Path = path.parent
         self.new_name: str | None = None
         self.attribute: dict | None = attribute
@@ -203,6 +197,6 @@ def _norm_path(path: str | Path):
     return path
 
 
-def _is_valid_extension(image: str | Path) -> bool:
+def _is_valid_img_extension(image: str | Path) -> bool:
     extens = _norm_path(image).suffix
     return extens == ".jpg" or extens == ".png" or extens == ".jpeg"
