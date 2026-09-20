@@ -123,7 +123,8 @@ class ImageCollection:
         if scheme == "numbered":
             digits = len(str(abs(len(self.images))))
             for index, img in enumerate(self.images):
-                img.new_name = f"{index:0{digits}d}"
+                if img.keep:
+                    img.new_name = f"{index:0{digits}d}"
 
     def save(self, dir: str | Path, images_per_dir: None | int):
         """Save the contents of the ImageCollection to a directory. The saved data will be
@@ -155,21 +156,22 @@ class ImageCollection:
 
                     src.copy(dst_image, preserve_metadata=True)
 
+        kept_images = [img for img in self.images if img.keep]
         if images_per_dir is not None:
             assert images_per_dir > 0, "images_per_dir must be greater than 0"
 
             # This does ceiling division to include the remainder in the chunks.
             for i in range(-(-len(self.images) // images_per_dir)):
                 dst_dir = ndir / f"{i:05d}"
-                dst_dir.mkdir()
+                dst_dir.mkdir(exist_ok=True)
 
                 copy_images_to_dir(
-                    self.images[images_per_dir * i : (i + 1) * images_per_dir], dst_dir
+                    kept_images[images_per_dir * i : (i + 1) * images_per_dir], dst_dir
                 )
 
             return
 
-        copy_images_to_dir(self.images, ndir)
+        copy_images_to_dir(kept_images, ndir)
 
 
 class Image:
