@@ -191,12 +191,18 @@ class Image:
         self.keep = True
 
     def to_tensor(self) -> torch.Tensor:
+        """Return the image as a torch tensor"""
         return read_image(str(self.file_dir) + "/" + self.file_name + self.file_extens)
 
     def to_pil(self) -> PIL.ImageFile.ImageFile:
+        """Return the image as a PIL image"""
         return PIL.Image.open(
             str(self.file_dir) + "/" + self.file_name + self.file_extens
         )
+
+    def show(self):
+        """Show the image using PIL"""
+        self.to_pil().show()
 
 
 def _norm_path(path: str | Path):
