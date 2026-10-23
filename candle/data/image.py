@@ -15,6 +15,12 @@ class ImageCollection:
     def __init__(self):
         self.images: list[Image] = []
 
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        return self.images[idx]
+
     def add(self, image: str | Path, attribute: dict | None = None):
         """Add one image to the ImageCollection
 
