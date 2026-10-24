@@ -124,8 +124,8 @@ class ImageCollection:
         """Rename all Images according to the specified scheme.
 
         Args:
-            scheme: "numbered": Name images by number, from 1 to number of images.
-                                For example, 001.jpg, 002.png, 003.jpeg.
+            scheme: "numbered": Name images by number, from 0 to number of images.
+                                For example, 000.jpg, 002.png, 003.jpeg.
         """
         if scheme == "numbered":
             digits = len(str(abs(len(self.images))))
