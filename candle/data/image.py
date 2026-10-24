@@ -1,3 +1,4 @@
+from abc import abstractmethod
 from pathlib import Path
 from collections.abc import Callable
 from collections import defaultdict
@@ -33,7 +34,7 @@ class ImageCollection:
         if not _is_valid_img_extension(path):
             return
 
-        self.images.append(Image(path, attribute))
+        self.images.append(Image(ImageSourceFile(path), attribute))
 
     def add_dir(
         self,
@@ -89,7 +90,7 @@ class ImageCollection:
         """
         for image_file, attribute in attribute_list:
             for image in self.images:
-                if image.file_name + image.file_extens == image_file:
+                if image.source.file_name + image.source.file_extens == image_file:
                     if image.attribute is None or override_existing_attributes:
                         image.attribute = attribute
                     break
@@ -148,19 +149,7 @@ class ImageCollection:
         def copy_images_to_dir(chunk: list[Image], dir: Path):
             for img in chunk:
                 if img.keep:
-                    src = img.file_dir / (img.file_name + img.file_extens)
-
-                    name = img.file_name
-                    if img.new_name is not None:
-                        name = img.new_name
-                    dst_image = dir / (name + img.file_extens)
-
-                    if not img.attribute is None:
-                        dst_meta = dir / (name + ".json")
-                        with open(dst_meta, "w") as f:
-                            json.dump(img.attribute, f)
-
-                    src.copy(dst_image, preserve_metadata=True)
+                    img.copy_to_dir(dir)
 
         kept_images = [img for img in self.images if img.keep]
         if images_per_dir is not None:
@@ -180,25 +169,74 @@ class ImageCollection:
         copy_images_to_dir(kept_images, ndir)
 
 
+class ImageSource:
+    file_name: str
+    file_extens: str
+
+    def __init__(self):
+        pass
+
+    @abstractmethod
+    def to_tensor(self) -> torch.Tensor:
+        pass
+
+    @abstractmethod
+    def to_pil(self) -> PIL.ImageFile.ImageFile:
+        pass
+
+    @abstractmethod
+    def write_to_file(self, file: Path):
+        pass
+
+
+class ImageSourceFile(ImageSource):
+    def __init__(self, path: str | Path):
+        path = _norm_path(path)
+        self.file_name = path.stem
+        self.file_extens = path.suffix.lower()
+        self.file_dir = path.parent
+
+    def to_tensor(self) -> torch.Tensor:
+        return read_image(str(self.file_dir) + "/" + self.file_name + self.file_extens)
+
+    def to_pil(self) -> PIL.ImageFile.ImageFile:
+        return PIL.Image.open(
+            str(self.file_dir) + "/" + self.file_name + self.file_extens
+        )
+
+    def write_to_file(self, file: Path):
+        src = self.file_dir / (self.file_name + self.file_extens)
+        src.copy(file, preserve_metadata=True)
+
+
 class Image:
-    def __init__(self, image: str | Path, attribute: dict | None = None):
-        path = _norm_path(image)
-        self.file_name: str = path.stem
-        self.file_extens: str = path.suffix.lower()
-        self.file_dir: Path = path.parent
+    def __init__(self, source: ImageSource, attribute: dict | None = None):
+        self.source = source
         self.new_name: str | None = None
         self.attribute: dict | None = attribute
         self.keep = True
 
+    def copy_to_dir(self, dir: str | Path):
+        dir = _norm_path(dir)
+
+        name = self.source.file_name
+        if self.new_name is not None:
+            name = self.new_name
+        dst_image = dir / (name + self.source.file_extens)
+
+        if not self.attribute is None:
+            with open(dir / (name + ".json"), "w") as f:
+                json.dump(self.attribute, f)
+
+        self.source.write_to_file(dst_image)
+
     def to_tensor(self) -> torch.Tensor:
         """Return the image as a torch tensor"""
-        return read_image(str(self.file_dir) + "/" + self.file_name + self.file_extens)
+        return self.source.to_tensor()
 
     def to_pil(self) -> PIL.ImageFile.ImageFile:
         """Return the image as a PIL image"""
-        return PIL.Image.open(
-            str(self.file_dir) + "/" + self.file_name + self.file_extens
-        )
+        return self.source.to_pil()
 
     def show(self):
         """Show the image using PIL"""
