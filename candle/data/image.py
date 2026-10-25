@@ -1,4 +1,7 @@
-from abc import abstractmethod
+import tarfile
+import shutil
+import torchvision
+import io
 from pathlib import Path
 from collections.abc import Callable
 from collections import defaultdict
@@ -9,7 +12,7 @@ from typing import Literal
 from torchvision.io import read_image
 import json
 
-__all__ = ["ImageCollection", "Image"]
+__all__ = ["ImageCollection", "Image", "ImageSourceFile", "ImageSourceTar"]
 
 
 class ImageCollection:
@@ -169,24 +172,7 @@ class ImageCollection:
         copy_images_to_dir(kept_images, ndir)
 
 
-class ImageSource:
-    def __init__(self):
-        pass
-
-    @abstractmethod
-    def to_tensor(self) -> torch.Tensor:
-        pass
-
-    @abstractmethod
-    def to_pil(self) -> PIL.ImageFile.ImageFile:
-        pass
-
-    @abstractmethod
-    def write_to_file(self, file: Path):
-        pass
-
-
-class ImageSourceFile(ImageSource):
+class ImageSourceFile:
     def __init__(self, path: str | Path):
         path = _norm_path(path)
         self.file_name = path.stem
@@ -204,6 +190,72 @@ class ImageSourceFile(ImageSource):
     def write_to_file(self, file: Path):
         src = self.file_dir / (self.file_name + self.file_extens)
         src.copy(file, preserve_metadata=True)
+
+
+class ImageSourceTar:
+    persist_file_handles: bool = False
+    open_tar_handles: dict[str, tarfile.TarFile] = {}
+
+    def __init__(self, tarfile: str | Path, path_in_tar: str):
+        self.tarfile = str(_norm_path(tarfile))
+        path = _norm_path(path_in_tar)
+        self.path_in_tar = str(path)
+        self.file_name = path.stem
+        self.file_extens = path.suffix.lower()
+        self.file_dir = path.parent
+
+    def to_tensor(self) -> torch.Tensor:
+        return torchvision.transforms.ToPILImage()(self.to_pil())
+
+    def to_pil(self) -> PIL.ImageFile.ImageFile:
+        handle = ImageSourceTar.open_tar_handles.get(self.path_in_tar, None)
+
+        handle_does_not_exist = handle is None
+        if handle_does_not_exist:
+            handle = tarfile.TarFile(self.tarfile, "r")
+
+        image = handle.extractfile(self.path_in_tar)
+
+        if image is None:
+            raise FileNotFoundError(
+                f"Could not find tar entry {self.path_in_tar} in {self.tarfile}"
+            )
+
+        image = image.read()
+        image = PIL.Image.open(io.BytesIO(image))
+
+        if ImageSourceTar.persist_file_handles:
+            if handle_does_not_exist:
+                ImageSourceTar.open_tar_handles[self.tarfile] = handle
+        else:
+            handle.close()
+
+        return image
+
+    def write_to_file(self, file: Path):
+        handle = ImageSourceTar.open_tar_handles.get(self.path_in_tar, None)
+
+        handle_does_not_exist = handle is None
+        if handle_does_not_exist:
+            handle = tarfile.TarFile(self.tarfile, "r")
+
+        image_file = handle.extractfile(self.path_in_tar)
+        if image_file is None:
+            raise FileNotFoundError(
+                f"Could not find tar entry {self.path_in_tar} in {self.tarfile}"
+            )
+
+        with open(file, "wb") as f:
+            shutil.copyfileobj(image_file, f)
+
+        if ImageSourceTar.persist_file_handles:
+            if handle_does_not_exist:
+                ImageSourceTar.open_tar_handles[self.tarfile] = handle
+        else:
+            handle.close()
+
+
+ImageSource = ImageSourceFile | ImageSourceTar
 
 
 class Image:

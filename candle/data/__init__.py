@@ -1,3 +1,3 @@
-from .image import Image, ImageCollection
+from .image import Image, ImageCollection, ImageSourceFile, ImageSourceTar
 
-__all__ = ["Image", "ImageCollection"]
+__all__ = ["Image", "ImageCollection", "ImageSourceFile", "ImageSourceTar"]
