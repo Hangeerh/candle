@@ -170,9 +170,6 @@ class ImageCollection:
 
 
 class ImageSource:
-    file_name: str
-    file_extens: str
-
     def __init__(self):
         pass
 
