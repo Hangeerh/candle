@@ -84,6 +84,49 @@ class ImageCollection:
         Args:
             tar: The path to the tarball containing images.
         """
+        path = _norm_path(tar)
+
+        if not path.is_file():
+            raise RuntimeError("Provided path is not a file")
+
+        # Group members by their name without the extension, just like add_dir.
+        # Read the archive sequentially once instead of looking up every image
+        # by name, which would scan the member list repeatedly.
+        valid_extens = (".jpg", ".jpeg", ".png")
+        valid_suffixes = {*valid_extens, ".json"}
+
+        grouped_samples: dict[str, dict[str, tarfile.TarInfo]] = defaultdict(dict)
+        with tarfile.open(path, "r") as tar_file:
+            for member in tar_file:
+                if not member.isfile():
+                    continue
+
+                member_path = Path(member.name)
+                ext = member_path.suffix.lower()
+                if ext not in valid_suffixes:
+                    continue
+
+                grouped_samples[str(member_path.with_suffix(""))][ext] = member
+
+            for extens in grouped_samples.values():
+                img_ext = next((ext for ext in extens if ext in valid_extens), None)
+                if img_ext is None:
+                    continue
+
+                attributes = None
+                json_member = extens.get(".json")
+                if json_member is not None:
+                    json_file = tar_file.extractfile(json_member)
+                    if json_file is not None:
+                        attributes = json.load(json_file)
+
+                image_member = extens[img_ext]
+                self.images.append(
+                    Image(
+                        ImageSourceTar(path, image_member.name, image_member),
+                        attributes,
+                    )
+                )
 
     def add_attributes(
         self,
@@ -203,13 +246,21 @@ class ImageSourceTar:
     persist_file_handles: bool = False
     open_tar_handles: dict[str, tarfile.TarFile] = {}
 
-    def __init__(self, tarfile: str | Path, path_in_tar: str):
+    def __init__(
+        self,
+        tarfile: str | Path,
+        path_in_tar: str,
+        member: tarfile.TarInfo | None = None,
+    ):
         self.tarfile = str(_norm_path(tarfile))
         path = _norm_path(path_in_tar)
         self.path_in_tar = str(path)
         self.file_name = path.stem
         self.file_extens = path.suffix.lower()
         self.file_dir = path.parent
+        # Reusing the TarInfo avoids searching the archive's member list when
+        # reading the image later.
+        self._member = member
 
     def to_tensor(self) -> torch.Tensor:
         return torchvision.transforms.ToPILImage()(self.to_pil())
@@ -219,9 +270,10 @@ class ImageSourceTar:
 
         handle_does_not_exist = handle is None
         if handle_does_not_exist:
-            handle = tarfile.TarFile(self.tarfile, "r")
+            handle = tarfile.open(self.tarfile, "r")
 
-        image = handle.extractfile(self.path_in_tar)
+        member = self._member if self._member is not None else self.path_in_tar
+        image = handle.extractfile(member)
 
         if image is None:
             raise FileNotFoundError(
@@ -244,9 +296,10 @@ class ImageSourceTar:
 
         handle_does_not_exist = handle is None
         if handle_does_not_exist:
-            handle = tarfile.TarFile(self.tarfile, "r")
+            handle = tarfile.open(self.tarfile, "r")
 
-        image_file = handle.extractfile(self.path_in_tar)
+        member = self._member if self._member is not None else self.path_in_tar
+        image_file = handle.extractfile(member)
         if image_file is None:
             raise FileNotFoundError(
                 f"Could not find tar entry {self.path_in_tar} in {self.tarfile}"

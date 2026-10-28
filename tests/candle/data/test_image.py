@@ -1,9 +1,29 @@
+import io
 import json
+import tarfile
 from pathlib import Path
 
 import pytest
+from PIL import Image as PILImage
 
-from candle.data.image import ImageCollection, _is_valid_img_extension, _norm_path
+from candle.data.image import (
+    ImageCollection,
+    ImageSourceTar,
+    _is_valid_img_extension,
+    _norm_path,
+)
+
+
+def _add_tar_member(tar: tarfile.TarFile, name: str, data: bytes):
+    info = tarfile.TarInfo(name)
+    info.size = len(data)
+    tar.addfile(info, io.BytesIO(data))
+
+
+def _png_bytes() -> bytes:
+    buffer = io.BytesIO()
+    PILImage.new("RGB", (2, 3), (255, 0, 0)).save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def test_norm_path_from_str():
@@ -107,6 +127,56 @@ def test_image_collection_add_dir_does_not_recurse_by_default(tmp_path: Path):
 
     assert len(collection) == 1
     assert collection[0].source.file_name == "a"
+
+
+def test_image_collection_add_tar_requires_file(tmp_path: Path):
+    collection = ImageCollection()
+    with pytest.raises(RuntimeError, match="Provided path is not a file"):
+        collection.add_tar(tmp_path / "missing.tar")
+
+
+def test_image_collection_add_tar_loads_images_and_json_attributes(tmp_path: Path):
+    tar_path = tmp_path / "images.tar"
+    with tarfile.open(tar_path, "w") as tar:
+        _add_tar_member(tar, "a.png", b"a")
+        _add_tar_member(tar, "a.json", json.dumps({"label": "cat"}).encode())
+        _add_tar_member(tar, "b.jpg", b"b")
+        _add_tar_member(tar, "c.txt", b"c")
+        _add_tar_member(tar, "orphan.json", json.dumps({"label": "orphan"}).encode())
+
+    collection = ImageCollection()
+    collection.add_tar(tar_path)
+
+    assert len(collection) == 2
+    assert {image.source.file_name for image in collection} == {"a", "b"}
+    assert all(isinstance(image.source, ImageSourceTar) for image in collection)
+    assert {image.source.path_in_tar for image in collection} == {"a.png", "b.jpg"}
+    assert next(
+        image for image in collection if image.source.file_name == "a"
+    ).attribute == {"label": "cat"}
+    assert (
+        next(image for image in collection if image.source.file_name == "b").attribute
+        is None
+    )
+
+
+def test_image_collection_add_tar_reads_and_copies_images(tmp_path: Path):
+    png = _png_bytes()
+    tar_path = tmp_path / "images.tar.gz"
+    with tarfile.open(tar_path, "w:gz") as tar:
+        _add_tar_member(tar, "a.png", png)
+        _add_tar_member(tar, "a.json", json.dumps({"label": "cat"}).encode())
+
+    collection = ImageCollection()
+    collection.add_tar(tar_path)
+
+    assert collection[0].to_pil().size == (2, 3)
+
+    destination = tmp_path / "dst"
+    collection.save(destination, images_per_dir=None)
+
+    assert (destination / "a.png").read_bytes() == png
+    assert json.loads((destination / "a.json").read_text()) == {"label": "cat"}
 
 
 def test_image_collection_add_attributes_and_override():
