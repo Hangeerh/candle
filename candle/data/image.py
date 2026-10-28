@@ -78,6 +78,13 @@ class ImageCollection:
 
                 self.add(img_file, attributes)
 
+    def add_tar(self, tar: str | Path):
+        """Add all images in a tarball. Supports WebDataset format.
+
+        Args:
+            tar: The path to the tarball containing images.
+        """
+
     def add_attributes(
         self,
         attribute_list: list[tuple[str, dict]],
@@ -208,7 +215,7 @@ class ImageSourceTar:
         return torchvision.transforms.ToPILImage()(self.to_pil())
 
     def to_pil(self) -> PIL.ImageFile.ImageFile:
-        handle = ImageSourceTar.open_tar_handles.get(self.path_in_tar, None)
+        handle = ImageSourceTar.open_tar_handles.get(self.tarfile)
 
         handle_does_not_exist = handle is None
         if handle_does_not_exist:
@@ -233,7 +240,7 @@ class ImageSourceTar:
         return image
 
     def write_to_file(self, file: Path):
-        handle = ImageSourceTar.open_tar_handles.get(self.path_in_tar, None)
+        handle = ImageSourceTar.open_tar_handles.get(self.tarfile)
 
         handle_does_not_exist = handle is None
         if handle_does_not_exist:
@@ -253,6 +260,12 @@ class ImageSourceTar:
                 ImageSourceTar.open_tar_handles[self.tarfile] = handle
         else:
             handle.close()
+
+    @classmethod
+    def clean_tar_handles(cls):
+        for handle in ImageSourceTar.open_tar_handles.values():
+            handle.close()
+        ImageSourceTar.open_tar_handles = {}
 
 
 ImageSource = ImageSourceFile | ImageSourceTar
