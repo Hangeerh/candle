@@ -102,6 +102,32 @@ def test_image_collection_add_dir_loads_images_and_json_attributes(tmp_path: Pat
     )
 
 
+def test_image_collection_add_ignores_macos_metadata():
+    collection = ImageCollection()
+    collection.add("._photo.jpg")
+    collection.add("photo.jpg")
+
+    assert [image.source.file_name for image in collection] == ["photo"]
+
+
+def test_image_collection_add_dir_ignores_macos_metadata(tmp_path: Path):
+    source_dir = tmp_path / "src"
+    metadata_dir = source_dir / "__MACOSX"
+    metadata_dir.mkdir(parents=True)
+    (source_dir / "a.png").write_text("a")
+    (source_dir / "a.json").write_text(json.dumps({"label": "cat"}))
+    (source_dir / "._a.png").write_bytes(b"ghost")
+    (source_dir / "._a.json").write_bytes(b"not json")
+    (metadata_dir / "._b.jpg").write_bytes(b"ghost")
+
+    collection = ImageCollection()
+    collection.add_dir(source_dir, recursive=True)
+
+    assert len(collection) == 1
+    assert collection[0].source.file_name == "a"
+    assert collection[0].attribute == {"label": "cat"}
+
+
 def test_image_collection_add_dir_recurses_when_requested(tmp_path: Path):
     source_dir = tmp_path / "src"
     sub_dir = source_dir / "sub"
@@ -158,6 +184,24 @@ def test_image_collection_add_tar_loads_images_and_json_attributes(tmp_path: Pat
         next(image for image in collection if image.source.file_name == "b").attribute
         is None
     )
+
+
+def test_image_collection_add_tar_ignores_macos_metadata(tmp_path: Path):
+    tar_path = tmp_path / "images.tar"
+    with tarfile.open(tar_path, "w") as tar:
+        _add_tar_member(tar, "00000.jpg", b"image")
+        _add_tar_member(tar, "00000.json", json.dumps({"label": "cat"}).encode())
+        _add_tar_member(tar, "._00000.jpg", b"ghost")
+        _add_tar_member(tar, "._00000.json", b"not json")
+        _add_tar_member(tar, "__MACOSX/._00000.jpg", b"ghost")
+        _add_tar_member(tar, "__MACOSX/00000/._00000.jpg", b"ghost")
+
+    collection = ImageCollection()
+    collection.add_tar(tar_path)
+
+    assert len(collection) == 1
+    assert collection[0].source.path_in_tar == "00000.jpg"
+    assert collection[0].attribute == {"label": "cat"}
 
 
 def test_image_collection_add_tar_reads_and_copies_images(tmp_path: Path):

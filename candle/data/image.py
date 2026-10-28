@@ -34,7 +34,7 @@ class ImageCollection:
         """
         path = _norm_path(image)
 
-        if not _is_valid_img_extension(path):
+        if _is_macos_metadata(path) or not _is_valid_img_extension(path):
             return
 
         self.images.append(Image(ImageSourceFile(path), attribute))
@@ -58,7 +58,7 @@ class ImageCollection:
         grouped_samples = defaultdict(dict)
         pattern = "**/*" if recursive else "*"
         for file in path.glob(pattern):
-            if file.is_file():
+            if file.is_file() and not _is_macos_metadata(file):
                 prefix = file.stem
                 ext = file.suffix.lower()
                 grouped_samples[prefix][ext] = file
@@ -102,6 +102,9 @@ class ImageCollection:
                     continue
 
                 member_path = Path(member.name)
+                if _is_macos_metadata(member_path):
+                    continue
+
                 ext = member_path.suffix.lower()
                 if ext not in valid_suffixes:
                     continue
@@ -362,6 +365,17 @@ def _norm_path(path: str | Path):
     if not isinstance(path, Path):
         return Path(path)
     return path
+
+
+def _is_macos_metadata(path: str | Path) -> bool:
+    """Return True for macOS metadata entries such as AppleDouble files.
+
+    macOS archives can contain ``._*`` resource-fork files alongside real files.
+    Tar archives may also store them under a ``__MACOSX`` directory. These entries
+    are not valid images or JSON documents and should not be treated as samples.
+    """
+    parts = _norm_path(path).parts
+    return "__MACOSX" in parts or any(part.startswith("._") for part in parts)
 
 
 def _is_valid_img_extension(image: str | Path) -> bool:
