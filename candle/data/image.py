@@ -140,7 +140,7 @@ class ImageCollection:
 
         Args:
             attribute_list: List of (image_name, attribute_dict) tuples. Note that
-                image_name does not include the extension.
+                image_name includes the extension.
             override_existing_attributes: If True, the newly specified attribute
                 will override existing attributes.
         """
