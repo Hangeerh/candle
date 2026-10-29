@@ -229,13 +229,19 @@ def test_image_collection_add_attributes_and_override():
     collection.add("b.png")
 
     collection.add_attributes(
-        [("a.jpg", {"label": "updated"}), ("b.png", {"label": "new"})]
+        [
+            ({"path": "a.jpg"}, {"label": "updated"}),
+            ({"path": "b.png"}, {"label": "new"}),
+        ]
     )
     assert collection[0].attribute == {"label": "original"}
     assert collection[1].attribute == {"label": "new"}
 
     collection.add_attributes(
-        [("a.jpg", {"label": "updated"}), ("missing.jpg", {"label": "ignored"})],
+        [
+            ({"path": "a.jpg"}, {"label": "updated"}),
+            ({"path": "missing.jpg"}, {"label": "ignored"}),
+        ],
         override_existing_attributes=True,
     )
     assert collection[0].attribute == {"label": "updated"}

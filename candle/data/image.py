@@ -8,7 +8,7 @@ from collections import defaultdict
 import PIL.Image
 import PIL.ImageFile
 import torch
-from typing import Literal
+from typing import Literal, TypedDict
 from torchvision.io import read_image
 import json
 
@@ -133,7 +133,7 @@ class ImageCollection:
 
     def add_attributes(
         self,
-        attribute_list: list[tuple[str, dict]],
+        attribute_list: list[tuple[ImageKey, dict]],
         override_existing_attributes: bool = False,
     ):
         """Attaches attributes to images in the ImageCollection.
@@ -144,12 +144,24 @@ class ImageCollection:
             override_existing_attributes: If True, the newly specified attribute
                 will override existing attributes.
         """
-        for image_file, attribute in attribute_list:
-            for image in self.images:
-                if image.source.file_name + image.source.file_extens == image_file:
-                    if image.attribute is None or override_existing_attributes:
-                        image.attribute = attribute
-                    break
+        key_attr_maps = defaultdict(list)
+        for key, fetched_attributes in attribute_list:
+            key_attr_maps[_hash_image_key(key)].append(fetched_attributes)
+
+        for image in self.images:
+            fetched_attributes = key_attr_maps.get(_hash_image_key(image.key), None)
+            if fetched_attributes == None:
+                continue
+
+            if len(fetched_attributes) > 1:
+                raise RuntimeWarning(
+                    f"Multiple attributes mapped to single key {image.key}. Using first attribute."
+                )
+
+            attribute = fetched_attributes[0]
+
+            if image.attribute is None or override_existing_attributes:
+                image.attribute = attribute
 
     def filter(self, filter_func: Callable[[Image], bool]):
         """Filter images with the given function.
@@ -228,9 +240,13 @@ class ImageCollection:
 class ImageSourceFile:
     def __init__(self, path: str | Path):
         path = _norm_path(path)
+        self.path = str(path)
         self.file_name = path.stem
         self.file_extens = path.suffix.lower()
         self.file_dir = path.parent
+
+    def make_key(self) -> ImageKeyFile:
+        return ImageKeyFile(path=self.path)
 
     def to_tensor(self) -> torch.Tensor:
         return read_image(str(self.file_dir) + "/" + self.file_name + self.file_extens)
@@ -264,6 +280,9 @@ class ImageSourceTar:
         # Reusing the TarInfo avoids searching the archive's member list when
         # reading the image later.
         self._member = member
+
+    def make_key(self) -> ImageKeyTar:
+        return ImageKeyTar(tar=self.tarfile, member=self.path_in_tar)
 
     def to_tensor(self) -> torch.Tensor:
         return torchvision.transforms.ToPILImage()(self.to_pil())
@@ -327,12 +346,25 @@ class ImageSourceTar:
 ImageSource = ImageSourceFile | ImageSourceTar
 
 
+class ImageKeyFile(TypedDict):
+    path: str
+
+
+class ImageKeyTar(TypedDict):
+    tar: str
+    member: str
+
+
+ImageKey = ImageKeyFile | ImageKeyTar
+
+
 class Image:
     def __init__(self, source: ImageSource, attribute: dict | None = None):
         self.source = source
         self.new_name: str | None = None
         self.attribute: dict | None = attribute
         self.keep = True
+        self.key: ImageKey = self.source.make_key()
 
     def copy_to_dir(self, dir: str | Path):
         dir = _norm_path(dir)
@@ -365,6 +397,10 @@ def _norm_path(path: str | Path):
     if not isinstance(path, Path):
         return Path(path)
     return path
+
+
+def _hash_image_key(key: ImageKey) -> tuple:
+    return tuple(sorted(key.items()))
 
 
 def _is_macos_metadata(path: str | Path) -> bool:
