@@ -248,6 +248,117 @@ def test_image_collection_add_attributes_and_override():
     assert len(collection) == 2
 
 
+def test_image_collection_add_attributes_to_tar_images(tmp_path: Path):
+    tar_path = tmp_path / "images.tar"
+    with tarfile.open(tar_path, "w") as tar:
+        _add_tar_member(tar, "a.png", b"a")
+        _add_tar_member(tar, "b.jpg", b"b")
+
+    collection = ImageCollection()
+    collection.add_tar(tar_path)
+
+    collection.add_attributes(
+        [
+            ({"tar": str(tar_path), "member": "a.png"}, {"label": "cat"}),
+            ({"tar": str(tar_path), "member": "b.jpg"}, {"label": "dog"}),
+            ({"tar": str(tar_path), "member": "missing.png"}, {"label": "ignored"}),
+        ]
+    )
+
+    assert {image.source.path_in_tar: image.attribute for image in collection} == {
+        "a.png": {"label": "cat"},
+        "b.jpg": {"label": "dog"},
+    }
+
+
+def test_image_collection_add_attributes_tar_and_override(tmp_path: Path):
+    tar_path = tmp_path / "images.tar"
+    with tarfile.open(tar_path, "w") as tar:
+        _add_tar_member(tar, "a.png", b"a")
+        _add_tar_member(tar, "a.json", json.dumps({"label": "original"}).encode())
+        _add_tar_member(tar, "b.jpg", b"b")
+
+    collection = ImageCollection()
+    collection.add_tar(tar_path)
+
+    collection.add_attributes(
+        [
+            ({"tar": str(tar_path), "member": "a.png"}, {"label": "updated"}),
+            ({"tar": str(tar_path), "member": "b.jpg"}, {"label": "new"}),
+        ]
+    )
+    assert next(
+        image for image in collection if image.source.path_in_tar == "a.png"
+    ).attribute == {"label": "original"}
+    assert next(
+        image for image in collection if image.source.path_in_tar == "b.jpg"
+    ).attribute == {"label": "new"}
+
+    collection.add_attributes(
+        [
+            ({"tar": str(tar_path), "member": "a.png"}, {"label": "updated"}),
+            ({"tar": str(tar_path), "member": "missing.png"}, {"label": "ignored"}),
+        ],
+        override_existing_attributes=True,
+    )
+    assert next(
+        image for image in collection if image.source.path_in_tar == "a.png"
+    ).attribute == {"label": "updated"}
+
+
+def test_image_collection_add_attributes_distinguishes_same_member_in_tars(
+    tmp_path: Path,
+):
+    first_tar_path = tmp_path / "first.tar"
+    second_tar_path = tmp_path / "second.tar"
+    for tar_path in (first_tar_path, second_tar_path):
+        with tarfile.open(tar_path, "w") as tar:
+            _add_tar_member(tar, "00000.jpg", b"image")
+
+    collection = ImageCollection()
+    collection.add_tar(first_tar_path)
+    collection.add_tar(second_tar_path)
+
+    collection.add_attributes(
+        [
+            (
+                {"tar": str(first_tar_path), "member": "00000.jpg"},
+                {"source": "first"},
+            ),
+            (
+                {"tar": str(second_tar_path), "member": "00000.jpg"},
+                {"source": "second"},
+            ),
+        ]
+    )
+
+    assert [image.attribute for image in collection] == [
+        {"source": "first"},
+        {"source": "second"},
+    ]
+
+
+def test_image_collection_add_attributes_rejects_duplicate_keys(tmp_path: Path):
+    tar_path = tmp_path / "images.tar"
+    with tarfile.open(tar_path, "w") as tar:
+        _add_tar_member(tar, "a.png", b"a")
+
+    collection = ImageCollection()
+    collection.add_tar(tar_path)
+
+    with pytest.raises(
+        RuntimeWarning, match="Multiple attributes mapped to single key"
+    ):
+        collection.add_attributes(
+            [
+                ({"tar": str(tar_path), "member": "a.png"}, {"label": "first"}),
+                ({"tar": str(tar_path), "member": "a.png"}, {"label": "second"}),
+            ]
+        )
+
+    assert collection[0].attribute is None
+
+
 def test_image_collection_filter_sets_keep_flags():
     collection = ImageCollection()
     collection.add("keep.jpg")
