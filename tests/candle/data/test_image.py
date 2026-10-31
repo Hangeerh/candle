@@ -217,7 +217,7 @@ def test_image_collection_add_tar_reads_and_copies_images(tmp_path: Path):
     assert collection[0].to_pil().size == (2, 3)
 
     destination = tmp_path / "dst"
-    collection.save(destination, images_per_dir=None)
+    collection.save(destination, images_per_shard=None)
 
     assert (destination / "a.png").read_bytes() == png
     assert json.loads((destination / "a.json").read_text()) == {"label": "cat"}
@@ -415,7 +415,7 @@ def test_image_collection_save_copies_only_kept_images(tmp_path: Path, monkeypat
         )
 
     destination = tmp_path / "dst"
-    collection.save(destination, images_per_dir=None)
+    collection.save(destination, images_per_shard=None)
 
     assert destination.is_dir()
     assert copied == [("first", destination), ("third", destination)]
@@ -440,7 +440,7 @@ def test_image_collection_save_shards_images_into_subdirectories(
         )
 
     destination = tmp_path / "dst"
-    collection.save(destination, images_per_dir=2)
+    collection.save(destination, images_per_shard=2)
 
     assert copied == [
         ("first", destination / "00000"),
@@ -455,4 +455,4 @@ def test_image_collection_save_requires_positive_shard_size(tmp_path: Path):
     collection.add("photo.jpg")
 
     with pytest.raises(AssertionError, match="images_per_dir must be greater than 0"):
-        collection.save(tmp_path / "dst", images_per_dir=0)
+        collection.save(tmp_path / "dst", images_per_shard=0)
