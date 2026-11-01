@@ -216,22 +216,23 @@ class ImageCollection:
         ndir = _norm_path(dir)
         ndir.mkdir(parents=True, exist_ok=True)
 
-        def copy_function_dir(chunk: list[Image], dst: str):
-            Path(dst).mkdir(exist_ok=True)
+        def copy_function_dir(chunk: list[Image], dst: Path):
+            dst.mkdir(exist_ok=True)
             for img in chunk:
-                img.copy_to_dir(dir)
+                img.copy_to_dir(dst)
 
-        def copy_function_tar(chunk: list[Image], dst: str):
-            with tarfile.open(dst + ".tar", "w") as t:
+        def copy_function_tar(chunk: list[Image], dst: Path):
+            with tarfile.open(str(dst) + ".tar", "w") as t:
                 for img in chunk:
                     name = img.source.file_name
                     if img.new_name is not None:
                         name = img.new_name
-                    dst = name + img.source.file_extens
-                    tarinfo = tarfile.TarInfo(name=dst)
-
-                    t.addfile(tarinfo, img.source.open())
+                    data = img.source.open()
                     img.source.close()
+                    tarinfo = tarfile.TarInfo(name=name + img.source.file_extens)
+                    tarinfo.size = data.getbuffer().nbytes
+
+                    t.addfile(tarinfo, data)
 
         if tar:
             copy_function = copy_function_tar
@@ -244,15 +245,15 @@ class ImageCollection:
             assert images_per_shard > 0, "images_per_dir must be greater than 0"
 
             # This does ceiling division to include the remainder in the chunks.
-            for i in range(-(-len(self.images) // images_per_shard)):
+            for i in range(-(-len(kept_images) // images_per_shard)):
                 dst_dir = ndir / f"{i:05d}"
 
                 copy_function(
                     kept_images[images_per_shard * i : (i + 1) * images_per_shard],
-                    str(dst_dir),
+                    dst_dir,
                 )
         else:
-            copy_function_dir(kept_images, str(ndir))
+            copy_function(kept_images, ndir / "00000" if tar else ndir)
 
         ImageSourceTar.persist_file_handles = False
         ImageSourceTar.clean_tar_handles()
@@ -279,6 +280,7 @@ class ImageSourceFile:
     def close(self):
         if self.file is not None:
             self.file.close()
+            self.file = None
 
     def to_tensor(self) -> torch.Tensor:
         return read_image(str(self.file_dir) + "/" + self.file_name + self.file_extens)
@@ -340,6 +342,7 @@ class ImageSourceTar:
     def close(self):
         if self.file is not None:
             self.file.close()
+            self.file = None
 
     def make_key(self) -> ImageKeyTar:
         return ImageKeyTar(tar=self.tarfile, member=self.path_in_tar)
