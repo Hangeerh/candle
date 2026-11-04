@@ -236,7 +236,6 @@ class ImageCollection:
 
         if tar:
             copy_function = copy_function_tar
-            ImageSourceTar.persist_file_handles = True
         else:
             copy_function = copy_function_dir
 
@@ -255,7 +254,6 @@ class ImageCollection:
         else:
             copy_function(kept_images, ndir / "00000" if tar else ndir)
 
-        ImageSourceTar.persist_file_handles = False
         ImageSourceTar.clean_tar_handles()
 
 
@@ -267,15 +265,18 @@ class ImageSourceFile:
         self.file_extens = path.suffix.lower()
         self.file_dir = path.parent
 
-        self.file = None
+        self.file: io.BytesIO | None = None
 
     def make_key(self) -> ImageKeyFile:
         return ImageKeyFile(path=self.path)
 
     def open(self) -> io.BytesIO:
         if self.file is None:
-            self.file = open(self.path, "rb")
-        return io.BytesIO(self.file.read())
+            file = open(self.path, "rb")
+            self.file = io.BytesIO(file.read())
+
+        self.file.seek(0)
+        return self.file
 
     def close(self):
         if self.file is not None:
@@ -316,7 +317,7 @@ class ImageSourceTar:
         # reading the image later.
         self._member = member
 
-        self.file = None
+        self.file: io.BytesIO | None = None
 
     def open(self) -> io.BytesIO:
         if self.file is None:
@@ -327,17 +328,20 @@ class ImageSourceTar:
                 handle = tarfile.open(self.tarfile, "r")
 
             member = self._member if self._member is not None else self.path_in_tar
-            self.file = handle.extractfile(member)
+            image_handle = handle.extractfile(member)
 
-            if self.file is None:
+            if image_handle is None:
                 raise FileNotFoundError(
                     f"Could not find tar entry {self.path_in_tar} in {self.tarfile}"
                 )
 
-            if ImageSourceTar.persist_file_handles and handle_does_not_exist:
+            self.file = io.BytesIO(image_handle.read())
+
+            if handle_does_not_exist:
                 ImageSourceTar.open_tar_handles[self.tarfile] = handle
 
-        return io.BytesIO(self.file.read())
+        self.file.seek(0)
+        return self.file
 
     def close(self):
         if self.file is not None:
@@ -370,9 +374,8 @@ class ImageSourceTar:
         with open(file, "wb") as f:
             shutil.copyfileobj(image_file, f)
 
-        if ImageSourceTar.persist_file_handles:
-            if handle_does_not_exist:
-                ImageSourceTar.open_tar_handles[self.tarfile] = handle
+        if handle_does_not_exist:
+            ImageSourceTar.open_tar_handles[self.tarfile] = handle
         else:
             handle.close()
 
