@@ -1,4 +1,5 @@
 import tarfile
+from .utility import _norm_path, _is_macos_metadata, _is_valid_img_extension
 import shutil
 import torchvision
 import io
@@ -216,43 +217,36 @@ class ImageCollection:
         ndir = _norm_path(dir)
         ndir.mkdir(parents=True, exist_ok=True)
 
-        def copy_function_dir(chunk: list[Image], dst: Path):
-            dst.mkdir(exist_ok=True)
-            for img in chunk:
-                img.copy_to_dir(dst)
-
-        def copy_function_tar(chunk: list[Image], dst: Path):
-            with tarfile.open(str(dst) + ".tar", "w") as t:
-                for img in chunk:
-                    name = img.source.file_name
-                    if img.new_name is not None:
-                        name = img.new_name
-                    data = img.source.open()
-                    img.source.close()
-                    tarinfo = tarfile.TarInfo(name=name + img.source.file_extens)
-                    tarinfo.size = data.getbuffer().nbytes
-
-                    t.addfile(tarinfo, data)
-
-        if tar:
-            copy_function = copy_function_tar
-        else:
-            copy_function = copy_function_dir
-
         kept_images = [img for img in self.images if img.keep]
         if images_per_shard is not None:
             assert images_per_shard > 0, "images_per_dir must be greater than 0"
 
-            # This does ceiling division to include the remainder in the chunks.
-            for i in range(-(-len(kept_images) // images_per_shard)):
-                dst_dir = ndir / f"{i:05d}"
+            shard = 0
+            if tar:
+                writer = TarWriter(ndir / f"{shard:05d}.tar", images_per_shard)
+                for image in kept_images:
+                    if writer.is_full():
+                        writer.close()
+                        writer = TarWriter(ndir / f"{shard:05d}.tar", images_per_shard)
+                    writer.write(image)
+            else:
+                writer = DirWriter(ndir / f"{shard:05d}/", images_per_shard)
+                for image in kept_images:
+                    if writer.is_full():
+                        writer = DirWriter(ndir / f"{shard:05d}/", images_per_shard)
+                    writer.write(image)
 
-                copy_function(
-                    kept_images[images_per_shard * i : (i + 1) * images_per_shard],
-                    dst_dir,
-                )
         else:
-            copy_function(kept_images, ndir / "00000" if tar else ndir)
+            if tar:
+                writer = TarWriter(ndir / "00000.tar", len(kept_images))
+                for image in kept_images:
+                    writer.write(image)
+
+                writer.close()
+            else:
+                writer = DirWriter(ndir / "00000/", len(kept_images))
+                for image in kept_images:
+                    writer.write(image)
 
         ImageSourceTar.clean_tar_handles()
 
@@ -401,6 +395,51 @@ class ImageKeyTar(TypedDict):
 ImageKey = ImageKeyFile | ImageKeyTar
 
 
+class DirWriter:
+    def __init__(self, dir: str | Path, capacity: int):
+        self.dir = _norm_path(dir)
+        self.capacity = capacity
+        self.written = 0
+
+        self.dir.mkdir(exist_ok=True)
+
+    def write(self, image: Image):
+        image.copy_to_dir(self.dir)
+        self.written += 1
+
+    def is_full(self):
+        return self.written < self.capacity
+
+
+class TarWriter:
+    def __init__(self, tar: str | Path, capacity: int):
+        self.tarpath = str(_norm_path(tar))
+        self.capacity = capacity
+        self.written = 0
+
+        self.tar = tarfile.open(self.tarpath, "w")
+
+    def write(self, image: Image):
+        name = image.source.file_name
+        if image.new_name is not None:
+            name = image.new_name
+        data = image.source.open()
+        image.source.close()
+
+        tarinfo = tarfile.TarInfo(name=name + image.source.file_extens)
+        tarinfo.size = data.getbuffer().nbytes
+
+        self.tar.addfile(tarinfo, data)
+
+        self.written += 1
+
+    def is_full(self):
+        return self.written < self.capacity
+
+    def close(self):
+        self.tar.close()
+
+
 class Image:
     def __init__(self, source: ImageSource, attribute: dict | None = None):
         self.source = source
@@ -436,27 +475,5 @@ class Image:
         self.to_pil().show()
 
 
-def _norm_path(path: str | Path):
-    if not isinstance(path, Path):
-        return Path(path)
-    return path
-
-
 def _hash_image_key(key: ImageKey) -> tuple:
     return tuple(sorted(key.items()))
-
-
-def _is_macos_metadata(path: str | Path) -> bool:
-    """Return True for macOS metadata entries such as AppleDouble files.
-
-    macOS archives can contain ``._*`` resource-fork files alongside real files.
-    Tar archives may also store them under a ``__MACOSX`` directory. These entries
-    are not valid images or JSON documents and should not be treated as samples.
-    """
-    parts = _norm_path(path).parts
-    return "__MACOSX" in parts or any(part.startswith("._") for part in parts)
-
-
-def _is_valid_img_extension(image: str | Path) -> bool:
-    extens = _norm_path(image).suffix
-    return extens == ".jpg" or extens == ".png" or extens == ".jpeg"
