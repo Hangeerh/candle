@@ -227,12 +227,16 @@ class ImageCollection:
                 for image in kept_images:
                     if writer.is_full():
                         writer.close()
+                        shard += 1
                         writer = TarWriter(ndir / f"{shard:05d}.tar", images_per_shard)
                     writer.write(image)
+
+                writer.close()
             else:
                 writer = DirWriter(ndir / f"{shard:05d}/", images_per_shard)
                 for image in kept_images:
                     if writer.is_full():
+                        shard += 1
                         writer = DirWriter(ndir / f"{shard:05d}/", images_per_shard)
                     writer.write(image)
 
@@ -244,7 +248,7 @@ class ImageCollection:
 
                 writer.close()
             else:
-                writer = DirWriter(ndir / "00000/", len(kept_images))
+                writer = DirWriter(ndir, len(kept_images))
                 for image in kept_images:
                     writer.write(image)
 
@@ -370,8 +374,6 @@ class ImageSourceTar:
 
         if handle_does_not_exist:
             ImageSourceTar.open_tar_handles[self.tarfile] = handle
-        else:
-            handle.close()
 
     @classmethod
     def clean_tar_handles(cls):
@@ -408,7 +410,7 @@ class DirWriter:
         self.written += 1
 
     def is_full(self):
-        return self.written < self.capacity
+        return self.written >= self.capacity
 
 
 class TarWriter:
@@ -424,17 +426,17 @@ class TarWriter:
         if image.new_name is not None:
             name = image.new_name
         data = image.source.open()
-        image.source.close()
 
         tarinfo = tarfile.TarInfo(name=name + image.source.file_extens)
         tarinfo.size = data.getbuffer().nbytes
 
         self.tar.addfile(tarinfo, data)
+        image.source.close()
 
         self.written += 1
 
     def is_full(self):
-        return self.written < self.capacity
+        return self.written >= self.capacity
 
     def close(self):
         self.tar.close()
