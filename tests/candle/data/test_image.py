@@ -1,14 +1,15 @@
 import io
 import json
+from typing import Literal
 import tarfile
 from pathlib import Path
 
 import pytest
 from PIL import Image as PILImage
 
-from candle.data.image import (
-    ImageCollection,
-    ImageSourceTar,
+from candle.data.image import ImageCollection, ImageSourceFile, ImageSourceTar
+from candle.data.utility import (
+    _is_macos_metadata,
     _is_valid_img_extension,
     _norm_path,
 )
@@ -20,38 +21,55 @@ def _add_tar_member(tar: tarfile.TarFile, name: str, data: bytes):
     tar.addfile(info, io.BytesIO(data))
 
 
+def _write_tar(
+    path: Path,
+    members: dict[str, bytes],
+    mode: Literal["r", "r:*", "r:", "r:gz", "r:bz2", "r:xz"] = "r",
+):
+    with tarfile.open(path, mode) as tar:
+        for name, data in members.items():
+            _add_tar_member(tar, name, data)
+
+
 def _png_bytes() -> bytes:
     buffer = io.BytesIO()
     PILImage.new("RGB", (2, 3), (255, 0, 0)).save(buffer, format="PNG")
     return buffer.getvalue()
 
 
-def test_norm_path_from_str():
-    assert _norm_path("foo/bar") == Path("foo/bar")
-
-
-def test_norm_path_from_path():
+def test_utility_helpers():
     path = Path("foo/bar")
     assert _norm_path(path) is path
+    assert _norm_path("foo/bar") == Path("foo/bar")
 
-
-def test_is_valid_img_extension():
     assert _is_valid_img_extension("photo.jpg") is True
-    assert _is_valid_img_extension("photo.png") is True
     assert _is_valid_img_extension("photo.jpeg") is True
-    assert _is_valid_img_extension("photo.txt") is False
-    assert _is_valid_img_extension("photo") is False
+    assert _is_valid_img_extension("photo.png") is True
     assert _is_valid_img_extension("photo.gif") is False
+    assert _is_valid_img_extension("photo") is False
+    assert _is_valid_img_extension("photo.txt") is False
+
+    assert _is_macos_metadata("._photo.jpg") is True
+    assert _is_macos_metadata("nested/._photo.jpg") is True
+    assert _is_macos_metadata("__MACOSX/photo.jpg") is True
+    assert _is_macos_metadata("nested/__MACOSX/photo.jpg") is True
+    assert _is_macos_metadata("photo.jpg") is False
 
 
-def test_image_collection_adds_valid_images_and_attributes():
+def test_add():
     collection = ImageCollection()
+    assert len(collection) == 0
+
     collection.add("photo.jpg", {"label": "cat"})
-    collection.add("photo.png")
-    collection.add("photo.jpeg")
+    collection.add(Path("photo.png"))
+    collection.add("photo.jpeg", {"label": "dog"})
     collection.add("photo.gif")
+    collection.add("photo")
+    collection.add("._photo.jpg")
+    collection.add("__MACOSX/photo.jpg")
 
     assert len(collection) == 3
+    assert all(isinstance(image.source, ImageSourceFile) for image in collection)
     assert [
         image.source.file_name + image.source.file_extens for image in collection
     ] == [
@@ -59,400 +77,360 @@ def test_image_collection_adds_valid_images_and_attributes():
         "photo.png",
         "photo.jpeg",
     ]
-    assert collection[0].attribute == {"label": "cat"}
-    assert collection[1].attribute is None
-
-
-def test_image_collection_getitem_supports_list_indexing():
-    collection = ImageCollection()
-    collection.add("first.jpg")
-    collection.add("second.jpg")
+    assert [image.attribute for image in collection] == [
+        {"label": "cat"},
+        None,
+        {"label": "dog"},
+    ]
+    assert all(image.keep for image in collection)
+    assert all(image.new_name is None for image in collection)
 
     assert collection[0] is collection.images[0]
     assert collection[-1] is collection.images[-1]
-    assert collection[:1] == collection.images[:1]
+    assert collection[:2] == collection.images[:2]
 
 
-def test_image_collection_add_dir_requires_directory(tmp_path: Path):
-    collection = ImageCollection()
+def test_add_dir(tmp_path: Path):
     with pytest.raises(RuntimeError, match="Provided path is not a directory"):
-        collection.add_dir(tmp_path / "missing")
+        ImageCollection().add_dir(tmp_path / "missing")
 
-
-def test_image_collection_add_dir_loads_images_and_json_attributes(tmp_path: Path):
-    source_dir = tmp_path / "src"
+    source_dir = tmp_path / "source"
     source_dir.mkdir()
-    (source_dir / "a.jpg").write_text("a")
+    (source_dir / "a.jpg").write_bytes(b"a")
     (source_dir / "a.json").write_text(json.dumps({"label": "cat"}))
-    (source_dir / "b.png").write_text("b")
-    (source_dir / "c.txt").write_text("c")
+    (source_dir / "b.png").write_bytes(b"b")
+    (source_dir / "c.txt").write_text("ignored")
     (source_dir / "orphan.json").write_text(json.dumps({"label": "orphan"}))
+    (source_dir / "._a.jpg").write_bytes(b"metadata")
+    (source_dir / "._a.json").write_text("not json")
 
-    collection = ImageCollection()
-    collection.add_dir(source_dir)
+    macos_dir = source_dir / "__MACOSX"
+    macos_dir.mkdir()
+    (macos_dir / "._b.png").write_bytes(b"metadata")
 
-    assert len(collection) == 2
-    assert {image.source.file_name for image in collection} == {"a", "b"}
-    assert next(
-        image for image in collection if image.source.file_name == "a"
-    ).attribute == {"label": "cat"}
-    assert (
-        next(image for image in collection if image.source.file_name == "b").attribute
-        is None
-    )
+    nested_dir = source_dir / "nested"
+    nested_dir.mkdir()
+    (nested_dir / "nested.jpeg").write_bytes(b"nested")
+    (nested_dir / "nested.json").write_text(json.dumps({"label": "nested"}))
 
+    flat = ImageCollection()
+    flat.add_dir(source_dir)
 
-def test_image_collection_add_ignores_macos_metadata():
-    collection = ImageCollection()
-    collection.add("._photo.jpg")
-    collection.add("photo.jpg")
+    assert len(flat) == 2
+    assert {image.source.file_name + image.source.file_extens for image in flat} == {
+        "a.jpg",
+        "b.png",
+    }
+    assert {image.source.file_name: image.attribute for image in flat} == {
+        "a": {"label": "cat"},
+        "b": None,
+    }
 
-    assert [image.source.file_name for image in collection] == ["photo"]
+    recursive = ImageCollection()
+    recursive.add_dir(source_dir, recursive=True)
 
-
-def test_image_collection_add_dir_ignores_macos_metadata(tmp_path: Path):
-    source_dir = tmp_path / "src"
-    metadata_dir = source_dir / "__MACOSX"
-    metadata_dir.mkdir(parents=True)
-    (source_dir / "a.png").write_text("a")
-    (source_dir / "a.json").write_text(json.dumps({"label": "cat"}))
-    (source_dir / "._a.png").write_bytes(b"ghost")
-    (source_dir / "._a.json").write_bytes(b"not json")
-    (metadata_dir / "._b.jpg").write_bytes(b"ghost")
-
-    collection = ImageCollection()
-    collection.add_dir(source_dir, recursive=True)
-
-    assert len(collection) == 1
-    assert collection[0].source.file_name == "a"
-    assert collection[0].attribute == {"label": "cat"}
-
-
-def test_image_collection_add_dir_recurses_when_requested(tmp_path: Path):
-    source_dir = tmp_path / "src"
-    sub_dir = source_dir / "sub"
-    sub_dir.mkdir(parents=True)
-    (source_dir / "a.jpg").write_text("a")
-    (sub_dir / "b.png").write_text("b")
-
-    collection = ImageCollection()
-    collection.add_dir(source_dir, recursive=True)
-
-    assert {image.source.file_name for image in collection} == {"a", "b"}
+    assert len(recursive) == 3
+    assert {
+        image.source.file_name + image.source.file_extens for image in recursive
+    } == {
+        "a.jpg",
+        "b.png",
+        "nested.jpeg",
+    }
+    assert {image.source.file_name: image.attribute for image in recursive} == {
+        "a": {"label": "cat"},
+        "b": None,
+        "nested": {"label": "nested"},
+    }
 
 
-def test_image_collection_add_dir_does_not_recurse_by_default(tmp_path: Path):
-    source_dir = tmp_path / "src"
-    sub_dir = source_dir / "sub"
-    sub_dir.mkdir(parents=True)
-    (source_dir / "a.jpg").write_text("a")
-    (sub_dir / "b.png").write_text("b")
-
-    collection = ImageCollection()
-    collection.add_dir(source_dir)
-
-    assert len(collection) == 1
-    assert collection[0].source.file_name == "a"
-
-
-def test_image_collection_add_tar_requires_file(tmp_path: Path):
-    collection = ImageCollection()
+def test_add_tar(tmp_path: Path):
     with pytest.raises(RuntimeError, match="Provided path is not a file"):
-        collection.add_tar(tmp_path / "missing.tar")
+        ImageCollection().add_tar(tmp_path / "missing.tar")
 
-
-def test_image_collection_add_tar_loads_images_and_json_attributes(tmp_path: Path):
-    tar_path = tmp_path / "images.tar"
-    with tarfile.open(tar_path, "w") as tar:
-        _add_tar_member(tar, "a.png", b"a")
-        _add_tar_member(tar, "a.json", json.dumps({"label": "cat"}).encode())
-        _add_tar_member(tar, "b.jpg", b"b")
-        _add_tar_member(tar, "c.txt", b"c")
-        _add_tar_member(tar, "orphan.json", json.dumps({"label": "orphan"}).encode())
-
-    collection = ImageCollection()
-    collection.add_tar(tar_path)
-
-    assert len(collection) == 2
-    assert {image.source.file_name for image in collection} == {"a", "b"}
-    assert all(isinstance(image.source, ImageSourceTar) for image in collection)
-    assert {image.source.path_in_tar for image in collection} == {"a.png", "b.jpg"}
-    assert next(
-        image for image in collection if image.source.file_name == "a"
-    ).attribute == {"label": "cat"}
-    assert (
-        next(image for image in collection if image.source.file_name == "b").attribute
-        is None
-    )
-
-
-def test_image_collection_add_tar_ignores_macos_metadata(tmp_path: Path):
-    tar_path = tmp_path / "images.tar"
-    with tarfile.open(tar_path, "w") as tar:
-        _add_tar_member(tar, "00000.jpg", b"image")
-        _add_tar_member(tar, "00000.json", json.dumps({"label": "cat"}).encode())
-        _add_tar_member(tar, "._00000.jpg", b"ghost")
-        _add_tar_member(tar, "._00000.json", b"not json")
-        _add_tar_member(tar, "__MACOSX/._00000.jpg", b"ghost")
-        _add_tar_member(tar, "__MACOSX/00000/._00000.jpg", b"ghost")
-
-    collection = ImageCollection()
-    collection.add_tar(tar_path)
-
-    assert len(collection) == 1
-    assert collection[0].source.path_in_tar == "00000.jpg"
-    assert collection[0].attribute == {"label": "cat"}
-
-
-def test_image_collection_add_tar_reads_and_copies_images(tmp_path: Path):
     png = _png_bytes()
     tar_path = tmp_path / "images.tar.gz"
-    with tarfile.open(tar_path, "w:gz") as tar:
-        _add_tar_member(tar, "a.png", png)
-        _add_tar_member(tar, "a.json", json.dumps({"label": "cat"}).encode())
+    _write_tar(
+        tar_path,
+        {
+            "a.png": png,
+            "a.json": json.dumps({"label": "cat"}).encode(),
+            "b.jpg": png,
+            "c.txt": b"ignored",
+            "orphan.json": json.dumps({"label": "orphan"}).encode(),
+            "._a.png": b"metadata",
+            "__MACOSX/00000/._b.jpg": b"metadata",
+            "nested/d.jpeg": png,
+            "nested/d.json": json.dumps({"label": "dog"}).encode(),
+        },
+        mode="w:gz",
+    )
 
     collection = ImageCollection()
     collection.add_tar(tar_path)
 
-    assert collection[0].to_pil().size == (2, 3)
+    assert len(collection) == 3
+    assert all(isinstance(image.source, ImageSourceTar) for image in collection)
+    assert {image.source.path_in_tar for image in collection} == {
+        "a.png",
+        "b.jpg",
+        "nested/d.jpeg",
+    }
+    assert {
+        image.source.file_name + image.source.file_extens for image in collection
+    } == {
+        "a.png",
+        "b.jpg",
+        "d.jpeg",
+    }
+    assert {image.source.path_in_tar: image.attribute for image in collection} == {
+        "a.png": {"label": "cat"},
+        "b.jpg": None,
+        "nested/d.jpeg": {"label": "dog"},
+    }
 
-    destination = tmp_path / "dst"
-    collection.save(destination, images_per_shard=None)
-
-    assert (destination / "a.png").read_bytes() == png
-    assert json.loads((destination / "a.json").read_text()) == {"label": "cat"}
+    first = next(image for image in collection if image.source.path_in_tar == "a.png")
+    assert first.to_pil().size == (2, 3)
+    assert first.source.open().read() == png
 
 
-def test_image_collection_add_attributes_and_override():
-    collection = ImageCollection()
-    collection.add("a.jpg", {"label": "original"})
-    collection.add("b.png")
+def test_add_attributes(tmp_path: Path):
+    files = ImageCollection()
+    files.add("a.jpg", {"label": "original"})
+    files.add("b.png")
+    files.add("c.jpeg")
 
-    collection.add_attributes(
+    files.add_attributes(
         [
             ({"path": "a.jpg"}, {"label": "updated"}),
             ({"path": "b.png"}, {"label": "new"}),
+            ({"path": "missing.jpg"}, {"label": "ignored"}),
         ]
     )
-    assert collection[0].attribute == {"label": "original"}
-    assert collection[1].attribute == {"label": "new"}
+    assert [image.attribute for image in files] == [
+        {"label": "original"},
+        {"label": "new"},
+        None,
+    ]
 
-    collection.add_attributes(
+    files.add_attributes(
         [
             ({"path": "a.jpg"}, {"label": "updated"}),
+            ({"path": "b.png"}, {"label": "also updated"}),
             ({"path": "missing.jpg"}, {"label": "ignored"}),
         ],
         override_existing_attributes=True,
     )
-    assert collection[0].attribute == {"label": "updated"}
-    assert len(collection) == 2
+    assert [image.attribute for image in files] == [
+        {"label": "updated"},
+        {"label": "also updated"},
+        None,
+    ]
 
+    first_tar = tmp_path / "first.tar"
+    _write_tar(
+        first_tar,
+        {
+            "a.png": b"a",
+            "a.json": json.dumps({"label": "original"}).encode(),
+            "b.jpg": b"b",
+        },
+    )
+    second_tar = tmp_path / "second.tar"
+    _write_tar(second_tar, {"a.png": b"second"})
 
-def test_image_collection_add_attributes_to_tar_images(tmp_path: Path):
-    tar_path = tmp_path / "images.tar"
-    with tarfile.open(tar_path, "w") as tar:
-        _add_tar_member(tar, "a.png", b"a")
-        _add_tar_member(tar, "b.jpg", b"b")
-
-    collection = ImageCollection()
-    collection.add_tar(tar_path)
-
-    collection.add_attributes(
+    tars = ImageCollection()
+    tars.add_tar(first_tar)
+    tars.add_tar(second_tar)
+    tars.add_attributes(
         [
-            ({"tar": str(tar_path), "member": "a.png"}, {"label": "cat"}),
-            ({"tar": str(tar_path), "member": "b.jpg"}, {"label": "dog"}),
-            ({"tar": str(tar_path), "member": "missing.png"}, {"label": "ignored"}),
+            ({"tar": str(first_tar), "member": "a.png"}, {"label": "updated"}),
+            ({"tar": str(first_tar), "member": "b.jpg"}, {"label": "new"}),
+            ({"tar": str(second_tar), "member": "a.png"}, {"label": "second"}),
+            ({"tar": str(first_tar), "member": "missing.png"}, {"label": "ignored"}),
         ]
     )
-
-    assert {image.source.path_in_tar: image.attribute for image in collection} == {
-        "a.png": {"label": "cat"},
-        "b.jpg": {"label": "dog"},
+    assert {
+        (image.source.tarfile, image.source.path_in_tar): image.attribute
+        for image in tars
+    } == {
+        (str(first_tar), "a.png"): {"label": "original"},
+        (str(first_tar), "b.jpg"): {"label": "new"},
+        (str(second_tar), "a.png"): {"label": "second"},
     }
 
-
-def test_image_collection_add_attributes_tar_and_override(tmp_path: Path):
-    tar_path = tmp_path / "images.tar"
-    with tarfile.open(tar_path, "w") as tar:
-        _add_tar_member(tar, "a.png", b"a")
-        _add_tar_member(tar, "a.json", json.dumps({"label": "original"}).encode())
-        _add_tar_member(tar, "b.jpg", b"b")
-
-    collection = ImageCollection()
-    collection.add_tar(tar_path)
-
-    collection.add_attributes(
-        [
-            ({"tar": str(tar_path), "member": "a.png"}, {"label": "updated"}),
-            ({"tar": str(tar_path), "member": "b.jpg"}, {"label": "new"}),
-        ]
-    )
-    assert next(
-        image for image in collection if image.source.path_in_tar == "a.png"
-    ).attribute == {"label": "original"}
-    assert next(
-        image for image in collection if image.source.path_in_tar == "b.jpg"
-    ).attribute == {"label": "new"}
-
-    collection.add_attributes(
-        [
-            ({"tar": str(tar_path), "member": "a.png"}, {"label": "updated"}),
-            ({"tar": str(tar_path), "member": "missing.png"}, {"label": "ignored"}),
-        ],
+    tars.add_attributes(
+        [({"tar": str(first_tar), "member": "a.png"}, {"label": "updated"})],
         override_existing_attributes=True,
     )
     assert next(
-        image for image in collection if image.source.path_in_tar == "a.png"
+        image
+        for image in tars
+        if image.source.tarfile == str(first_tar)
+        and image.source.path_in_tar == "a.png"
     ).attribute == {"label": "updated"}
 
-
-def test_image_collection_add_attributes_distinguishes_same_member_in_tars(
-    tmp_path: Path,
-):
-    first_tar_path = tmp_path / "first.tar"
-    second_tar_path = tmp_path / "second.tar"
-    for tar_path in (first_tar_path, second_tar_path):
-        with tarfile.open(tar_path, "w") as tar:
-            _add_tar_member(tar, "00000.jpg", b"image")
-
-    collection = ImageCollection()
-    collection.add_tar(first_tar_path)
-    collection.add_tar(second_tar_path)
-
-    collection.add_attributes(
-        [
-            (
-                {"tar": str(first_tar_path), "member": "00000.jpg"},
-                {"source": "first"},
-            ),
-            (
-                {"tar": str(second_tar_path), "member": "00000.jpg"},
-                {"source": "second"},
-            ),
-        ]
-    )
-
-    assert [image.attribute for image in collection] == [
-        {"source": "first"},
-        {"source": "second"},
-    ]
-
-
-def test_image_collection_add_attributes_rejects_duplicate_keys(tmp_path: Path):
-    tar_path = tmp_path / "images.tar"
-    with tarfile.open(tar_path, "w") as tar:
-        _add_tar_member(tar, "a.png", b"a")
-
-    collection = ImageCollection()
-    collection.add_tar(tar_path)
-
+    duplicates = ImageCollection()
+    duplicates.add("duplicate.jpg")
     with pytest.raises(
         RuntimeWarning, match="Multiple attributes mapped to single key"
     ):
-        collection.add_attributes(
+        duplicates.add_attributes(
             [
-                ({"tar": str(tar_path), "member": "a.png"}, {"label": "first"}),
-                ({"tar": str(tar_path), "member": "a.png"}, {"label": "second"}),
+                ({"path": "duplicate.jpg"}, {"label": "first"}),
+                ({"path": "duplicate.jpg"}, {"label": "second"}),
             ]
         )
+    assert duplicates[0].attribute is None
 
-    assert collection[0].attribute is None
 
-
-def test_image_collection_filter_sets_keep_flags():
+def test_filter():
     collection = ImageCollection()
-    collection.add("keep.jpg")
-    collection.add("discard.jpg")
+    collection.add("first.jpg")
+    collection.add("second.jpg")
+    collection.add("third.jpg")
 
-    collection.filter(lambda image: image.source.file_name == "keep")
+    collection.filter(lambda image: image.source.file_name != "second")
+    assert [image.keep for image in collection] == [True, False, True]
 
-    assert [image.keep for image in collection] == [True, False]
+    collection.filter(lambda image: image.source.file_name == "third")
+    assert [image.keep for image in collection] == [False, False, True]
 
 
-def test_image_collection_merge_accepts_collection_or_list():
+def test_merge():
     first = ImageCollection()
     first.add("first.jpg")
+    first_image = first[0]
     second = ImageCollection()
     second.add("second.jpg")
     third = ImageCollection()
     third.add("third.jpg")
 
     first.merge(second)
+    assert first.images == [first_image, second[0]]
+
     first.merge([third])
+    assert first.images == [first_image, second[0], third[0]]
 
+    first.merge([])
     assert len(first) == 3
-    assert first[1] is second[0]
-    assert first[2] is third[0]
 
 
-def test_image_collection_batch_rename_numbers_kept_images():
+def test_batch_rename():
     collection = ImageCollection()
-    collection.add("first.jpg")
-    collection.add("second.jpg")
-    collection.add("third.jpg")
-    collection.filter(lambda image: image.source.file_name != "second")
+    for index in range(12):
+        collection.add(f"{index}.jpg")
 
+    collection.filter(lambda image: int(image.source.file_name) % 5 == 0)
     collection.batch_rename()
 
-    assert [image.new_name for image in collection] == ["0", None, "2"]
+    new_names = {image.source.file_name: image.new_name for image in collection}
+    assert new_names["0"] == "00"
+    assert new_names["5"] == "05"
+    assert new_names["10"] == "10"
+    assert new_names["1"] is None
+    assert new_names["11"] is None
 
 
-def test_image_collection_save_copies_only_kept_images(tmp_path: Path, monkeypatch):
+def test_save(tmp_path: Path):
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    colors = {
+        "first": (255, 0, 0),
+        "second": (0, 255, 0),
+        "third": (0, 0, 255),
+        "fourth": (255, 255, 0),
+    }
+    for name, color in colors.items():
+        PILImage.new("RGB", (2, 3), color).save(source_dir / f"{name}.png")
+
     collection = ImageCollection()
-    collection.add("first.jpg")
-    collection.add("second.jpg")
-    collection.add("third.jpg")
+    for name in colors:
+        collection.add(source_dir / f"{name}.png")
+    collection.add_attributes(
+        [({"path": str(source_dir / "first.png")}, {"label": "first"})]
+    )
     collection.filter(lambda image: image.source.file_name != "second")
-    copied = []
-
-    for image in collection:
-        monkeypatch.setattr(
-            image,
-            "copy_to_dir",
-            lambda directory, image=image: copied.append(
-                (image.source.file_name, directory)
-            ),
-        )
-
-    destination = tmp_path / "dst"
-    collection.save(destination, images_per_shard=None)
-
-    assert destination.is_dir()
-    assert copied == [("first", destination), ("third", destination)]
-
-
-def test_image_collection_save_shards_images_into_subdirectories(
-    tmp_path: Path, monkeypatch
-):
-    collection = ImageCollection()
-    collection.add("first.jpg")
-    collection.add("second.jpg")
-    collection.add("third.jpg")
-    copied = []
-
-    for image in collection:
-        monkeypatch.setattr(
-            image,
-            "copy_to_dir",
-            lambda directory, image=image: copied.append(
-                (image.source.file_name, directory)
-            ),
-        )
-
-    destination = tmp_path / "dst"
-    collection.save(destination, images_per_shard=2)
-
-    assert copied == [
-        ("first", destination / "00000"),
-        ("second", destination / "00000"),
-        ("third", destination / "00001"),
-    ]
-    assert all(directory.is_dir() for _, directory in copied)
-
-
-def test_image_collection_save_requires_positive_shard_size(tmp_path: Path):
-    collection = ImageCollection()
-    collection.add("photo.jpg")
 
     with pytest.raises(AssertionError, match="images_per_dir must be greater than 0"):
-        collection.save(tmp_path / "dst", images_per_shard=0)
+        collection.save(tmp_path / "invalid", images_per_shard=0)
+
+    flat = tmp_path / "flat"
+    collection.save(flat, images_per_shard=None)
+    assert sorted(path.name for path in flat.iterdir()) == [
+        "first.json",
+        "first.png",
+        "fourth.png",
+        "third.png",
+    ]
+    assert (flat / "first.png").read_bytes() == (source_dir / "first.png").read_bytes()
+    assert json.loads((flat / "first.json").read_text()) == {"label": "first"}
+
+    sharded = tmp_path / "sharded"
+    collection.save(sharded, images_per_shard=2)
+    assert sorted(path.name for path in sharded.iterdir()) == ["00000", "00001"]
+    assert sorted(path.name for path in (sharded / "00000").iterdir()) == [
+        "first.json",
+        "first.png",
+        "third.png",
+    ]
+    assert sorted(path.name for path in (sharded / "00001").iterdir()) == ["fourth.png"]
+
+    collection.batch_rename()
+    assert [(image.source.file_name, image.new_name) for image in collection] == [
+        ("first", "0"),
+        ("second", None),
+        ("third", "2"),
+        ("fourth", "3"),
+    ]
+
+    tar_flat = tmp_path / "tar-flat"
+    collection.save(tar_flat, images_per_shard=None, tar=True)
+    assert [path.name for path in tar_flat.iterdir()] == ["00000.tar"]
+    with tarfile.open(tar_flat / "00000.tar") as tar:
+        members = {
+            member.name: tar.extractfile(member).read()
+            for member in tar
+            if member.isfile()
+        }
+    assert set(members) == {"0.png", "2.png", "3.png"}
+    assert members["0.png"] == (source_dir / "first.png").read_bytes()
+    assert members["2.png"] == (source_dir / "third.png").read_bytes()
+    assert members["3.png"] == (source_dir / "fourth.png").read_bytes()
+
+    tar_sharded = tmp_path / "tar-sharded"
+    collection.save(tar_sharded, images_per_shard=2, tar=True)
+    assert sorted(path.name for path in tar_sharded.iterdir()) == [
+        "00000.tar",
+        "00001.tar",
+    ]
+    with tarfile.open(tar_sharded / "00000.tar") as tar:
+        assert [member.name for member in tar if member.isfile()] == ["0.png", "2.png"]
+    with tarfile.open(tar_sharded / "00001.tar") as tar:
+        assert [member.name for member in tar if member.isfile()] == ["3.png"]
+
+    png = _png_bytes()
+    source_tar = tmp_path / "source.tar"
+    _write_tar(
+        source_tar,
+        {
+            "a.png": png,
+            "a.json": json.dumps({"label": "a"}).encode(),
+            "b.png": png,
+            "c.png": png,
+        },
+    )
+    tar_collection = ImageCollection()
+    tar_collection.add_tar(source_tar)
+
+    tar_source_dir = tmp_path / "tar-source"
+    tar_collection.save(tar_source_dir, images_per_shard=None)
+    assert sorted(path.name for path in tar_source_dir.iterdir()) == [
+        "a.json",
+        "a.png",
+        "b.png",
+        "c.png",
+    ]
+    assert json.loads((tar_source_dir / "a.json").read_text()) == {"label": "a"}
+    for name in ("a", "b", "c"):
+        assert (tar_source_dir / f"{name}.png").read_bytes() == png
