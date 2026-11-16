@@ -218,39 +218,15 @@ class ImageCollection:
         ndir.mkdir(parents=True, exist_ok=True)
 
         kept_images = [img for img in self.images if img.keep]
-        if images_per_shard is not None:
-            assert images_per_shard > 0, "images_per_dir must be greater than 0"
 
-            shard = 0
-            if tar:
-                writer = TarWriter(ndir / f"{shard:05d}.tar", images_per_shard)
-                for image in kept_images:
-                    if writer.is_full():
-                        writer.close()
-                        shard += 1
-                        writer = TarWriter(ndir / f"{shard:05d}.tar", images_per_shard)
-                    writer.write(image)
-
-                writer.close()
-            else:
-                writer = DirWriter(ndir / f"{shard:05d}/", images_per_shard)
-                for image in kept_images:
-                    if writer.is_full():
-                        shard += 1
-                        writer = DirWriter(ndir / f"{shard:05d}/", images_per_shard)
-                    writer.write(image)
-
+        if tar:
+            writer = TarWriter(ndir, images_per_shard)
         else:
-            if tar:
-                writer = TarWriter(ndir / "00000.tar", len(kept_images))
-                for image in kept_images:
-                    writer.write(image)
+            writer = DirWriter(ndir, images_per_shard)
 
-                writer.close()
-            else:
-                writer = DirWriter(ndir, len(kept_images))
-                for image in kept_images:
-                    writer.write(image)
+        for image in kept_images:
+            writer.write(image)
+        writer.close()
 
         ImageSourceTar.clean_tar_handles()
 
@@ -398,30 +374,50 @@ ImageKey = ImageKeyFile | ImageKeyTar
 
 
 class DirWriter:
-    def __init__(self, dir: str | Path, capacity: int):
-        self.dir = _norm_path(dir)
-        self.capacity = capacity
-        self.written = 0
+    def __init__(self, working_dir: str | Path, shard_capacity: int | None):
+        self.working_directory = _norm_path(working_dir)
 
-        self.dir.mkdir(exist_ok=True)
+        self.shard_capacity = shard_capacity
+        self.shard_index = 0
+
+        self.written = 0
+        self.working_directory.mkdir(exist_ok=True)
 
     def write(self, image: Image):
-        image.copy_to_dir(self.dir)
+        # Start a new shard if full
+        if (self.shard_capacity is not None) and self.written >= self.shard_capacity:
+            self.shard_index += 1
+            self.written = 0
+
+        image.copy_to_dir(self.working_directory / f"{self.shard_index:05d}/")
         self.written += 1
 
-    def is_full(self):
-        return self.written >= self.capacity
+    def close(self):
+        pass
 
 
 class TarWriter:
-    def __init__(self, tar: str | Path, capacity: int):
-        self.tarpath = str(_norm_path(tar))
-        self.capacity = capacity
+    def __init__(self, working_directory: str | Path, shard_capacity: int | None):
+        self.working_directory = _norm_path(working_directory)
+
+        self.shard_capacity = shard_capacity
+        self.shard_index = 0
         self.written = 0
 
-        self.tar = tarfile.open(self.tarpath, "w")
+        self.tar = tarfile.open(
+            self.working_directory / f"{self.shard_index:05d}.tar", "w"
+        )
 
     def write(self, image: Image):
+        # Start new shard if full
+        if (self.shard_capacity is not None) and self.written >= self.shard_capacity:
+            self.tar.close()
+            self.shard_index += 1
+            self.written = 0
+            self.tar = tarfile.open(
+                self.working_directory / f"{self.shard_index:05d}.tar", "w"
+            )
+
         name = image.source.file_name
         if image.new_name is not None:
             name = image.new_name
@@ -434,9 +430,6 @@ class TarWriter:
         image.source.close()
 
         self.written += 1
-
-    def is_full(self):
-        return self.written >= self.capacity
 
     def close(self):
         self.tar.close()
