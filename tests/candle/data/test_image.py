@@ -1,6 +1,5 @@
 import io
 import json
-from typing import Literal
 import tarfile
 from pathlib import Path
 
@@ -19,16 +18,6 @@ def _add_tar_member(tar: tarfile.TarFile, name: str, data: bytes):
     info = tarfile.TarInfo(name)
     info.size = len(data)
     tar.addfile(info, io.BytesIO(data))
-
-
-def _write_tar(
-    path: Path,
-    members: dict[str, bytes],
-    mode: Literal["r", "r:*", "r:", "r:gz", "r:bz2", "r:xz"] = "r",
-):
-    with tarfile.open(path, mode) as tar:
-        for name, data in members.items():
-            _add_tar_member(tar, name, data)
 
 
 def _png_bytes() -> bytes:
@@ -150,21 +139,20 @@ def test_add_tar(tmp_path: Path):
 
     png = _png_bytes()
     tar_path = tmp_path / "images.tar.gz"
-    _write_tar(
-        tar_path,
-        {
-            "a.png": png,
-            "a.json": json.dumps({"label": "cat"}).encode(),
-            "b.jpg": png,
-            "c.txt": b"ignored",
-            "orphan.json": json.dumps({"label": "orphan"}).encode(),
-            "._a.png": b"metadata",
-            "__MACOSX/00000/._b.jpg": b"metadata",
-            "nested/d.jpeg": png,
-            "nested/d.json": json.dumps({"label": "dog"}).encode(),
-        },
-        mode="w:gz",
-    )
+    tar_members = {
+        "a.png": png,
+        "a.json": json.dumps({"label": "cat"}).encode(),
+        "b.jpg": png,
+        "c.txt": b"ignored",
+        "orphan.json": json.dumps({"label": "orphan"}).encode(),
+        "._a.png": b"metadata",
+        "__MACOSX/00000/._b.jpg": b"metadata",
+        "nested/d.jpeg": png,
+        "nested/d.json": json.dumps({"label": "dog"}).encode(),
+    }
+    with tarfile.open(tar_path, "w:gz") as tar:
+        for name, data in tar_members.items():
+            _add_tar_member(tar, name, data)
 
     collection = ImageCollection()
     collection.add_tar(tar_path)
@@ -228,16 +216,18 @@ def test_add_attributes(tmp_path: Path):
     ]
 
     first_tar = tmp_path / "first.tar"
-    _write_tar(
-        first_tar,
-        {
-            "a.png": b"a",
-            "a.json": json.dumps({"label": "original"}).encode(),
-            "b.jpg": b"b",
-        },
-    )
+    first_tar_members = {
+        "a.png": b"a",
+        "a.json": json.dumps({"label": "original"}).encode(),
+        "b.jpg": b"b",
+    }
+    with tarfile.open(first_tar, "w") as tar:
+        for name, data in first_tar_members.items():
+            _add_tar_member(tar, name, data)
+
     second_tar = tmp_path / "second.tar"
-    _write_tar(second_tar, {"a.png": b"second"})
+    with tarfile.open(second_tar, "w") as tar:
+        _add_tar_member(tar, "a.png", b"second")
 
     tars = ImageCollection()
     tars.add_tar(first_tar)
@@ -352,7 +342,9 @@ def test_save(tmp_path: Path):
     )
     collection.filter(lambda image: image.source.file_name != "second")
 
-    with pytest.raises(AssertionError, match="images_per_dir must be greater than 0"):
+    with pytest.raises(
+        ValueError, match="Cannot create shards with less than 1 element"
+    ):
         collection.save(tmp_path / "invalid", images_per_shard=0)
 
     flat = tmp_path / "flat"
@@ -411,15 +403,15 @@ def test_save(tmp_path: Path):
 
     png = _png_bytes()
     source_tar = tmp_path / "source.tar"
-    _write_tar(
-        source_tar,
-        {
-            "a.png": png,
-            "a.json": json.dumps({"label": "a"}).encode(),
-            "b.png": png,
-            "c.png": png,
-        },
-    )
+    source_tar_members = {
+        "a.png": png,
+        "a.json": json.dumps({"label": "a"}).encode(),
+        "b.png": png,
+        "c.png": png,
+    }
+    with tarfile.open(source_tar, "w") as tar:
+        for name, data in source_tar_members.items():
+            _add_tar_member(tar, name, data)
     tar_collection = ImageCollection()
     tar_collection.add_tar(source_tar)
 

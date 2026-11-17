@@ -375,13 +375,21 @@ ImageKey = ImageKeyFile | ImageKeyTar
 
 class DirWriter:
     def __init__(self, working_dir: str | Path, shard_capacity: int | None):
-        self.working_directory = _norm_path(working_dir)
+        if shard_capacity is not None and shard_capacity < 1:
+            raise ValueError("Cannot create shards with less than 1 element")
+
+        self.root = _norm_path(working_dir)
 
         self.shard_capacity = shard_capacity
         self.shard_index = 0
-
         self.written = 0
-        self.working_directory.mkdir(exist_ok=True)
+
+        self.root.mkdir(exist_ok=True)
+        if self.shard_capacity is not None:
+            self.working_dir = self.root / f"{self.shard_index:05d}/"
+            self.working_dir.mkdir(exist_ok=True)
+        else:
+            self.working_dir = self.root
 
     def write(self, image: Image):
         # Start a new shard if full
@@ -389,7 +397,10 @@ class DirWriter:
             self.shard_index += 1
             self.written = 0
 
-        image.copy_to_dir(self.working_directory / f"{self.shard_index:05d}/")
+            self.working_dir = self.root / f"{self.shard_index:05d}/"
+            self.working_dir.mkdir()
+
+        image.copy_to_dir(self.working_dir)
         self.written += 1
 
     def close(self):
@@ -398,6 +409,9 @@ class DirWriter:
 
 class TarWriter:
     def __init__(self, working_directory: str | Path, shard_capacity: int | None):
+        if shard_capacity is not None and shard_capacity < 1:
+            raise ValueError("Cannot create shards with less than 1 element")
+
         self.working_directory = _norm_path(working_directory)
 
         self.shard_capacity = shard_capacity
