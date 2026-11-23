@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from candle.data.pipeline import pipeline_dir
+from candle.data import pipeline
 
 
 def _clean_file(file: Path):
@@ -17,8 +17,8 @@ def test_pipeline_dir_parallel_matches_sequential(tmp_path: Path):
     (tmp_path / "boom.txt").write_text("boom")
     (tmp_path / "wrong.txt").write_text("wrong")
 
-    sequential = pipeline_dir(_clean_file, str, num_workers=1)(tmp_path)
-    parallel = pipeline_dir(_clean_file, str, num_workers=2)(tmp_path)
+    sequential = pipeline.dir(_clean_file, str, num_workers=1)(tmp_path)
+    parallel = pipeline.dir(_clean_file, str, num_workers=2)(tmp_path)
 
     assert sorted(sequential.successes) == sorted(parallel.successes) == ["a", "b"]
     assert {path.name for path, _ in sequential.failures} == {

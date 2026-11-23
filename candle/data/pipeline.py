@@ -1,10 +1,10 @@
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
-from .utility import _norm_path
+from candle.data.utility import _norm_path
 from pathlib import Path
 
-__all__ = ["pipeline_dir"]
+__all__ = ["dir"]
 
 
 class PipelineResult:
@@ -23,7 +23,7 @@ def _clean_one_instance(clean_func: Callable, file: Path):
         return None, e
 
 
-def pipeline_dir(
+def dir(
     clean_func: Callable,
     target_type: type,
     num_workers: int = 0,

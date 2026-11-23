@@ -1,10 +1,4 @@
-from .image import Image, ImageCollection, ImageSourceFile, ImageSourceTar
-from .pipeline import pipeline_dir
+from candle.data.image import Image, ImageCollection, ImageSourceFile, ImageSourceTar
+import candle.data.pipeline as pipeline
 
-__all__ = [
-    "Image",
-    "ImageCollection",
-    "ImageSourceFile",
-    "ImageSourceTar",
-    "pipeline_dir",
-]
+__all__ = ["Image", "ImageCollection", "ImageSourceFile", "ImageSourceTar", "pipeline"]
