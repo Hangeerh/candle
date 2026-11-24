@@ -1,7 +1,7 @@
 from collections.abc import Callable
+from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
-from multiprocessing import Pipe
 from candle.data.utility import _norm_path
 from pathlib import Path
 
@@ -38,6 +38,28 @@ def _clean_one_instance(clean_func: Callable, *args, **kwargs):
         return clean_func(*args, **kwargs), None
     except Exception as e:
         return None, e
+
+
+def Directory(filter: Callable[..., bool], group: Callable[..., str]) -> Callable:
+    def wrapped_gather(directory: str | Path, recursive: bool) -> list:
+        cwd = _norm_path(directory)
+        if not cwd.is_dir():
+            raise ValueError(f"{directory} must be a directory")
+
+        pattern = "**/*" if recursive else "*"
+        files = [
+            file for file in cwd.glob(pattern) if (file.is_file() and filter(file))
+        ]
+
+        # The group function assigns ids to files. To make two files go to the same
+        # group, assign the same id to them.
+        grouped_samples = defaultdict(list)
+        for file in files:
+            grouped_samples[group(file)].append(file)
+
+        return [member for member in grouped_samples.values()]
+
+    return wrapped_gather
 
 
 def dir(
