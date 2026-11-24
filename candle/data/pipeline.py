@@ -9,11 +9,27 @@ __all__ = ["dir"]
 
 
 class PipelineResult:
-    # TODO: This may seem redundant to make results a class, but I plan on adding
-    #   features such as success rate statistics and such, so it is good.
     def __init__(self, successes: list, failures: list):
+        if len(successes) < 1:
+            raise ValueError(f"Empty list passed for argument successes")
+
         self.successes = successes
         self.failures = failures
+
+        self.num_successes = len(successes)
+        self.num_failures = len(failures)
+
+        self.success_rate = self.num_successes / (
+            self.num_successes + self.num_failures
+        )
+
+    def __str__(self) -> str:
+        return (
+            f"PipelineResult("
+            f"num_successes={self.num_successes}, "
+            f"num_failures={self.num_failures}, "
+            f"success_rate={self.success_rate})"
+        )
 
 
 def _clean_one_instance(clean_func: Callable, *args, **kwargs):
