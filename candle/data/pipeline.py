@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
+from multiprocessing import Pipe
 from candle.data.utility import _norm_path
 from pathlib import Path
 
@@ -15,10 +16,10 @@ class PipelineResult:
         self.failures = failures
 
 
-def _clean_one_instance(clean_func: Callable, file: Path):
+def _clean_one_instance(clean_func: Callable, *args, **kwargs):
     """Run ``clean_func`` on one file, capturing any exception it raises."""
     try:
-        return clean_func(file), None
+        return clean_func(*args, **kwargs), None
     except Exception as e:
         return None, e
 
@@ -67,6 +68,34 @@ def dir(
             for file in files:
                 cleaned, error = _clean_one_instance(clean_func, file)
                 record_result(file, cleaned, error)
+
+        return PipelineResult(successes, failures)
+
+    return wrapped_clean
+
+
+# TODO: finish implementation
+def tar(clean_func: Callable, target_type: type, num_workers: int = 0):
+    def wrapped_clean(tar_path: str | Path) -> PipelineResult:
+        successes = []
+        failures = []
+
+        tarball = _norm_path(tar_path)
+
+        def record_result(file, cleaned, error):
+            if error is not None:
+                failures.append((file, error))
+            elif not isinstance(cleaned, target_type):
+                failures.append(
+                    (
+                        file,
+                        TypeError(
+                            f"Expected type {target_type}, got type {type(cleaned)}"
+                        ),
+                    )
+                )
+            else:
+                successes.append(cleaned)
 
         return PipelineResult(successes, failures)
 
