@@ -32,14 +32,6 @@ class PipelineResult:
         )
 
 
-def _clean_one_instance(clean_func: Callable, *args, **kwargs):
-    """Run ``clean_func`` on one file, capturing any exception it raises."""
-    try:
-        return clean_func(*args, **kwargs), None
-    except Exception as e:
-        return None, e
-
-
 def Directory(filter: Callable[..., bool], group: Callable[..., str]) -> Callable:
     def wrapped_gather(directory: str | Path, recursive: bool) -> list:
         cwd = _norm_path(directory)
@@ -60,6 +52,55 @@ def Directory(filter: Callable[..., bool], group: Callable[..., str]) -> Callabl
         return [member for member in grouped_samples.values()]
 
     return wrapped_gather
+
+
+def _clean_one_instance(clean_func: Callable, *args, **kwargs):
+    """Run ``clean_func`` on one file, capturing any exception it raises."""
+    try:
+        return clean_func(*args, **kwargs), None
+    except Exception as e:
+        return None, e
+
+
+def Cleaner(clean: Callable, target_type: type, num_workers: int = 0) -> Callable:
+    def wrapped_clean(groups: list) -> PipelineResult:
+        successes = []
+        failures = []
+
+        def record_result(group, cleaned, error):
+            if error is not None:
+                failures.append((group, error))
+
+            elif not isinstance(cleaned, target_type):
+                failures.append(
+                    (
+                        group,
+                        TypeError(
+                            f"Expected type {target_type}, got type {type(cleaned)}"
+                        ),
+                    )
+                )
+
+            else:
+                successes.append(cleaned)
+
+        if num_workers > 1:
+            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                results = executor.map(
+                    partial(_clean_one_instance, clean),
+                    groups,
+                )
+
+                for group, (cleaned, error) in zip(groups, results):
+                    record_result(group, cleaned, error)
+        else:
+            for group in groups:
+                cleaned, error = _clean_one_instance(clean, group)
+                record_result(group, cleaned, error)
+
+        return PipelineResult(successes, failures)
+
+    return wrapped_clean
 
 
 def dir(
