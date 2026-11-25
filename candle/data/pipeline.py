@@ -9,19 +9,43 @@ __all__ = ["dir"]
 
 
 class PipelineResult:
-    def __init__(self, successes: list, failures: list):
-        if len(successes) < 1:
-            raise ValueError(f"Empty list passed for argument successes")
+    def __init__(
+        self,
+        target_type: type,
+        successes: list | None = None,
+        failures: list | None = None,
+    ):
+        self.target_type = target_type
+        self.successes = successes if successes is not None else []
+        self.failures = failures if failures is not None else []
 
-        self.successes = successes
-        self.failures = failures
+    @property
+    def num_successes(self) -> int:
+        return len(self.successes)
 
-        self.num_successes = len(successes)
-        self.num_failures = len(failures)
+    @property
+    def num_failures(self) -> int:
+        return len(self.failures)
 
-        self.success_rate = self.num_successes / (
-            self.num_successes + self.num_failures
-        )
+    @property
+    def success_rate(self) -> float:
+        total = self.num_successes + self.num_failures
+        return self.num_successes / total if total else 0.0
+
+    def record(self, item, cleaned, error) -> None:
+        if error is not None:
+            self.failures.append((item, error))
+        elif not isinstance(cleaned, self.target_type):
+            self.failures.append(
+                (
+                    item,
+                    TypeError(
+                        f"Expected type {self.target_type}, got type {type(cleaned)}"
+                    ),
+                )
+            )
+        else:
+            self.successes.append(cleaned)
 
     def __str__(self) -> str:
         return (
@@ -64,25 +88,7 @@ def _clean_one_instance(clean_func: Callable, *args, **kwargs):
 
 def Cleaner(clean: Callable, target_type: type, num_workers: int = 0) -> Callable:
     def wrapped_clean(groups: list) -> PipelineResult:
-        successes = []
-        failures = []
-
-        def record_result(group, cleaned, error):
-            if error is not None:
-                failures.append((group, error))
-
-            elif not isinstance(cleaned, target_type):
-                failures.append(
-                    (
-                        group,
-                        TypeError(
-                            f"Expected type {target_type}, got type {type(cleaned)}"
-                        ),
-                    )
-                )
-
-            else:
-                successes.append(cleaned)
+        result = PipelineResult(target_type)
 
         if num_workers > 1:
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
@@ -92,13 +98,13 @@ def Cleaner(clean: Callable, target_type: type, num_workers: int = 0) -> Callabl
                 )
 
                 for group, (cleaned, error) in zip(groups, results):
-                    record_result(group, cleaned, error)
+                    result.record(group, cleaned, error)
         else:
             for group in groups:
                 cleaned, error = _clean_one_instance(clean, group)
-                record_result(group, cleaned, error)
+                result.record(group, cleaned, error)
 
-        return PipelineResult(successes, failures)
+        return result
 
     return wrapped_clean
 
@@ -117,23 +123,7 @@ def dir(
         pattern = "**/*" if recursive else "*"
         files = [f for f in cwd.glob(pattern) if f.is_file()]
 
-        successes = []
-        failures = []
-
-        def record_result(file, cleaned, error):
-            if error is not None:
-                failures.append((file, error))
-            elif not isinstance(cleaned, target_type):
-                failures.append(
-                    (
-                        file,
-                        TypeError(
-                            f"Expected type {target_type}, got type {type(cleaned)}"
-                        ),
-                    )
-                )
-            else:
-                successes.append(cleaned)
+        result = PipelineResult(target_type)
 
         if num_workers > 1:
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
@@ -142,13 +132,13 @@ def dir(
                     files,
                 )
                 for file, (cleaned, error) in zip(files, results):
-                    record_result(file, cleaned, error)
+                    result.record(file, cleaned, error)
         else:
             for file in files:
                 cleaned, error = _clean_one_instance(clean_func, file)
-                record_result(file, cleaned, error)
+                result.record(file, cleaned, error)
 
-        return PipelineResult(successes, failures)
+        return result
 
     return wrapped_clean
 
@@ -156,26 +146,10 @@ def dir(
 # TODO: finish implementation
 def tar(clean_func: Callable, target_type: type, num_workers: int = 0):
     def wrapped_clean(tar_path: str | Path) -> PipelineResult:
-        successes = []
-        failures = []
+        result = PipelineResult(target_type)
 
         tarball = _norm_path(tar_path)
 
-        def record_result(file, cleaned, error):
-            if error is not None:
-                failures.append((file, error))
-            elif not isinstance(cleaned, target_type):
-                failures.append(
-                    (
-                        file,
-                        TypeError(
-                            f"Expected type {target_type}, got type {type(cleaned)}"
-                        ),
-                    )
-                )
-            else:
-                successes.append(cleaned)
-
-        return PipelineResult(successes, failures)
+        return result
 
     return wrapped_clean
