@@ -1,5 +1,5 @@
 import tarfile
-from candle.data.utility import _norm_path, _is_macos_metadata, _is_valid_img_extension
+from candle.utility.file import _norm_path, _is_macos_metadata, _is_valid_img_extension
 import shutil
 import torchvision
 import io

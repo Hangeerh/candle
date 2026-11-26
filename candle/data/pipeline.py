@@ -3,7 +3,7 @@ from collections.abc import Callable
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
-from candle.data.utility import _norm_path, _is_macos_metadata
+from candle.utility.file import _norm_path, _is_macos_metadata
 from pathlib import Path
 
 __all__ = ["Directory", "Tar", "Cleaner"]

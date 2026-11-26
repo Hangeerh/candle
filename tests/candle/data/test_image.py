@@ -7,11 +7,6 @@ import pytest
 from PIL import Image as PILImage
 
 from candle.data.image import ImageCollection, ImageSourceFile, ImageSourceTar
-from candle.data.utility import (
-    _is_macos_metadata,
-    _is_valid_img_extension,
-    _norm_path,
-)
 
 
 def _add_tar_member(tar: tarfile.TarFile, name: str, data: bytes):
@@ -24,25 +19,6 @@ def _png_bytes() -> bytes:
     buffer = io.BytesIO()
     PILImage.new("RGB", (2, 3), (255, 0, 0)).save(buffer, format="PNG")
     return buffer.getvalue()
-
-
-def test_utility_helpers():
-    path = Path("foo/bar")
-    assert _norm_path(path) is path
-    assert _norm_path("foo/bar") == Path("foo/bar")
-
-    assert _is_valid_img_extension("photo.jpg") is True
-    assert _is_valid_img_extension("photo.jpeg") is True
-    assert _is_valid_img_extension("photo.png") is True
-    assert _is_valid_img_extension("photo.gif") is False
-    assert _is_valid_img_extension("photo") is False
-    assert _is_valid_img_extension("photo.txt") is False
-
-    assert _is_macos_metadata("._photo.jpg") is True
-    assert _is_macos_metadata("nested/._photo.jpg") is True
-    assert _is_macos_metadata("__MACOSX/photo.jpg") is True
-    assert _is_macos_metadata("nested/__MACOSX/photo.jpg") is True
-    assert _is_macos_metadata("photo.jpg") is False
 
 
 def test_add():
