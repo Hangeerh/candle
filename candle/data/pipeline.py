@@ -5,7 +5,7 @@ from functools import partial
 from candle.data.utility import _norm_path
 from pathlib import Path
 
-__all__ = ["dir"]
+__all__ = ["Directory", "Cleaner"]
 
 
 class PipelineResult:
@@ -103,52 +103,6 @@ def Cleaner(clean: Callable, target_type: type, num_workers: int = 0) -> Callabl
             for group in groups:
                 cleaned, error = _clean_one_instance(clean, group)
                 result.record(group, cleaned, error)
-
-        return result
-
-    return wrapped_clean
-
-
-def dir(
-    clean_func: Callable,
-    target_type: type,
-    num_workers: int = 0,
-):
-    def wrapped_clean(
-        working_dir: str | Path, recursive: bool = False
-    ) -> PipelineResult:
-        cwd = _norm_path(working_dir)
-        assert cwd.is_dir()
-
-        pattern = "**/*" if recursive else "*"
-        files = [f for f in cwd.glob(pattern) if f.is_file()]
-
-        result = PipelineResult(target_type)
-
-        if num_workers > 1:
-            with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                results = executor.map(
-                    partial(_clean_one_instance, clean_func),
-                    files,
-                )
-                for file, (cleaned, error) in zip(files, results):
-                    result.record(file, cleaned, error)
-        else:
-            for file in files:
-                cleaned, error = _clean_one_instance(clean_func, file)
-                result.record(file, cleaned, error)
-
-        return result
-
-    return wrapped_clean
-
-
-# TODO: finish implementation
-def tar(clean_func: Callable, target_type: type, num_workers: int = 0):
-    def wrapped_clean(tar_path: str | Path) -> PipelineResult:
-        result = PipelineResult(target_type)
-
-        tarball = _norm_path(tar_path)
 
         return result
 
