@@ -1,4 +1,5 @@
 import tarfile
+import tempfile
 from collections.abc import Callable
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
@@ -79,7 +80,18 @@ def Directory(filter: Callable[..., bool], group: Callable[..., str]) -> Callabl
     return wrapped_gather
 
 
-def Tar(filter: Callable[..., bool], group: Callable[..., str]) -> Callable:
+class _ExtractedGroups(list):
+    """Groups of extracted files that keep their temporary directory alive."""
+
+    def __init__(self, groups, tmp_dir: tempfile.TemporaryDirectory):
+        super().__init__(groups)
+        self._tmp_dir = tmp_dir
+
+
+def Tar(
+    filter: Callable[..., bool],
+    group: Callable[..., str],
+) -> Callable:
     def wrapped_filter(member) -> bool:
         return (
             (not _is_macos_metadata(member.name))
@@ -92,10 +104,16 @@ def Tar(filter: Callable[..., bool], group: Callable[..., str]) -> Callable:
         if not tar.is_file():
             raise ValueError(f"{tarball} must be a file")
 
+        tmp_dir = tempfile.TemporaryDirectory()
+        base_dir = Path(tmp_dir.name)
+
         with tarfile.open(tar, "r") as tar:
             files = [
                 member for member in tar if (member.isfile() and wrapped_filter(member))
             ]
+            tar.extractall(path=base_dir, members=files, filter="data")
+
+        files = [file for file in base_dir.glob("**/*") if file.is_file()]
 
         # The group function assigns ids to files. To make two files go to the same
         # group, assign the same id to them.
@@ -103,7 +121,7 @@ def Tar(filter: Callable[..., bool], group: Callable[..., str]) -> Callable:
         for file in files:
             grouped_samples[group(file)].append(file)
 
-        return [member for member in grouped_samples.values()]
+        return _ExtractedGroups(grouped_samples.values(), tmp_dir)
 
     return wrapped_gather
 
