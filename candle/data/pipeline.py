@@ -1,11 +1,12 @@
+import tarfile
 from collections.abc import Callable
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
-from candle.data.utility import _norm_path
+from candle.data.utility import _norm_path, _is_macos_metadata
 from pathlib import Path
 
-__all__ = ["Directory", "Cleaner"]
+__all__ = ["Directory", "Tar", "Cleaner"]
 
 
 class PipelineResult:
@@ -66,6 +67,35 @@ def Directory(filter: Callable[..., bool], group: Callable[..., str]) -> Callabl
         files = [
             file for file in cwd.glob(pattern) if (file.is_file() and filter(file))
         ]
+
+        # The group function assigns ids to files. To make two files go to the same
+        # group, assign the same id to them.
+        grouped_samples = defaultdict(list)
+        for file in files:
+            grouped_samples[group(file)].append(file)
+
+        return [member for member in grouped_samples.values()]
+
+    return wrapped_gather
+
+
+def Tar(filter: Callable[..., bool], group: Callable[..., str]) -> Callable:
+    def wrapped_filter(member) -> bool:
+        return (
+            (not _is_macos_metadata(member.name))
+            and filter(member)
+            and (not member.isdir())
+        )
+
+    def wrapped_gather(tarball: str | Path) -> list:
+        tar = _norm_path(tarball)
+        if not tar.is_file():
+            raise ValueError(f"{tarball} must be a file")
+
+        with tarfile.open(tar, "r") as tar:
+            files = [
+                member for member in tar if (member.isfile() and wrapped_filter(member))
+            ]
 
         # The group function assigns ids to files. To make two files go to the same
         # group, assign the same id to them.
