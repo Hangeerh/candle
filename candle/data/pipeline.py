@@ -87,6 +87,28 @@ class _ExtractedGroups(list):
         super().__init__(groups)
         self._tmp_dir = tmp_dir
 
+    def __getitem__(self, index):
+        result = super().__getitem__(index)
+        if isinstance(index, slice):
+            return _ExtractedGroups(result, self._tmp_dir)
+        return result
+
+    def __add__(self, other):
+        result = super().__add__(other)
+        return _ExtractedGroups(result, self._tmp_dir)
+
+    def __radd__(self, other):
+        result = other + list(self)
+        return _ExtractedGroups(result, self._tmp_dir)
+
+    def __mul__(self, count):
+        return _ExtractedGroups(super().__mul__(count), self._tmp_dir)
+
+    __rmul__ = __mul__
+
+    def copy(self):
+        return _ExtractedGroups(self, self._tmp_dir)
+
 
 def Tar(
     filter: Callable[..., bool],
