@@ -7,7 +7,7 @@ from functools import partial
 from candle.utility.file import _norm_path, _is_macos_metadata
 from pathlib import Path
 
-__all__ = ["Directory", "Tar", "Cleaner"]
+__all__ = ["Directory", "Tar", "Cleaner", "SinkDir"]
 
 
 class PipelineResult:
@@ -155,3 +155,37 @@ def Cleaner(clean: Callable, target_type: type, num_workers: int = 0) -> Callabl
         return result
 
     return wrapped_clean
+
+
+def SinkDir(save: Callable) -> Callable:
+    def wrapped_save(
+        obj: PipelineResult,
+        directory: str | Path,
+        instances_per_shard: int | None = None,
+    ):
+        root = _norm_path(directory)
+        root.mkdir(parents=True, exist_ok=True)
+
+        shard_index = 0
+        written = 0
+        total_idx = 0
+
+        if instances_per_shard is not None:
+            working_directory = root / f"{shard_index:05d}/"
+            working_directory.mkdir(exist_ok=True)
+        else:
+            working_directory = root
+
+        for instance in obj.successes:
+            if (instances_per_shard is not None) and written >= instances_per_shard:
+                shard_index += 1
+                written = 0
+
+                working_directory = root / f"{shard_index:05d}/"
+                working_directory.mkdir()
+
+            save(instance, working_directory / str(f"{total_idx:05d}"))
+            written += 1
+            total_idx += 1
+
+    return wrapped_save
