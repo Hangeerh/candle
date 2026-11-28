@@ -58,24 +58,31 @@ class PipelineResult:
         )
 
 
-def Directory(filter: Callable[..., bool], group: Callable[..., str]) -> Callable:
+def Directory(
+    filter: Callable[..., bool] | None = None, group: Callable[..., str] | None = None
+) -> Callable:
     def wrapped_gather(directory: str | Path, recursive: bool) -> list:
         cwd = _norm_path(directory)
         if not cwd.is_dir():
             raise ValueError(f"{directory} must be a directory")
 
         pattern = "**/*" if recursive else "*"
-        files = [
-            file for file in cwd.glob(pattern) if (file.is_file() and filter(file))
-        ]
+        if filter is not None:
+            files = [
+                file for file in cwd.glob(pattern) if (file.is_file() and filter(file))
+            ]
+        else:
+            files = [file for file in cwd.glob(pattern) if file.is_file()]
 
         # The group function assigns ids to files. To make two files go to the same
         # group, assign the same id to them.
-        grouped_samples = defaultdict(list)
-        for file in files:
-            grouped_samples[group(file)].append(file)
+        if group is not None:
+            grouped_samples = defaultdict(list)
+            for file in files:
+                grouped_samples[group(file)].append(file)
 
-        return [member for member in grouped_samples.values()]
+            return [member for member in grouped_samples.values()]
+        return files
 
     return wrapped_gather
 
@@ -111,15 +118,14 @@ class _ExtractedGroups(list):
 
 
 def Tar(
-    filter: Callable[..., bool],
-    group: Callable[..., str],
+    filter: Callable[..., bool] | None = None,
+    group: Callable[..., str] | None = None,
 ) -> Callable:
     def wrapped_filter(member) -> bool:
-        return (
-            (not _is_macos_metadata(member.name))
-            and filter(member)
-            and (not member.isdir())
-        )
+        cond = (not _is_macos_metadata(member.name)) and (not member.is_dir())
+        if filter is not None:
+            return cond and filter(member)
+        return cond
 
     def wrapped_gather(tarball: str | Path) -> list:
         tar = _norm_path(tarball)
@@ -139,11 +145,13 @@ def Tar(
 
         # The group function assigns ids to files. To make two files go to the same
         # group, assign the same id to them.
-        grouped_samples = defaultdict(list)
-        for file in files:
-            grouped_samples[group(file)].append(file)
+        if group is not None:
+            grouped_samples = defaultdict(list)
+            for file in files:
+                grouped_samples[group(file)].append(file)
 
-        return _ExtractedGroups(grouped_samples.values(), tmp_dir)
+            return _ExtractedGroups(grouped_samples.values(), tmp_dir)
+        return _ExtractedGroups(files, tmp_dir)
 
     return wrapped_gather
 
