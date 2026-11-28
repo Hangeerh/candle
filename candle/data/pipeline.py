@@ -59,7 +59,8 @@ class PipelineResult:
 
 
 def Directory(
-    filter: Callable[..., bool] | None = None, group: Callable[..., str] | None = None
+    filter: Callable[[Path], bool] | None = None,
+    group: Callable[[Path], str] | None = None,
 ) -> Callable:
     def wrapped_gather(directory: str | Path, recursive: bool) -> list:
         cwd = _norm_path(directory)
@@ -118,8 +119,8 @@ class _ExtractedGroups(list):
 
 
 def Tar(
-    filter: Callable[..., bool] | None = None,
-    group: Callable[..., str] | None = None,
+    filter: Callable[[tarfile.TarInfo], bool] | None = None,
+    group: Callable[[Path], str] | None = None,
 ) -> Callable:
     def wrapped_filter(member) -> bool:
         cond = (not _is_macos_metadata(member.name)) and (not member.is_dir())
